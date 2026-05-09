@@ -1,0 +1,15 @@
+{
+  "name": "@aiwolf/ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@aiwolf/shared": "workspace:*",
+    "@aiwolf/engine": "workspace:*",
+    "openai": "^4",
+    "zod": "^3"
+  }
+}
