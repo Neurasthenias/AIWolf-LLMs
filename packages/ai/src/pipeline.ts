@@ -1,7 +1,9 @@
-import type { GameState, Command } from "@aiwolf/shared/types"
+import type { GameState, Command, GameEvent } from "@aiwolf/shared/types"
 import { v7 as uuidv7 } from "uuid"
 import { AIProvider, type AIProviderConfig, type AIIntent } from "./providers/openai"
 import { buildContext } from "./context/builder"
+import { assignPersonality, type Personality } from "./personality"
+import { createMemory, updateMemory, type AgentMemory } from "./memory"
 import * as fs from "node:fs"
 
 export interface AITrace {
@@ -18,12 +20,11 @@ export interface AITrace {
   fallbackUsed: boolean
 }
 
-/**
- * AI Pipeline — MVP: Context → Speak/Act
- */
 export class AIPipeline {
   private provider: AIProvider
   private traceDir: string
+  private personalities = new Map<string, Personality>()
+  private memories = new Map<string, AgentMemory>()
 
   constructor(config: AIProviderConfig, traceDir = ".data/traces") {
     this.provider = new AIProvider(config)
@@ -31,12 +32,48 @@ export class AIPipeline {
     fs.mkdirSync(traceDir, { recursive: true })
   }
 
+  /** Initialize personality for a player when role is assigned */
+  initPlayer(playerId: string, role: string, faction: string, seed?: number): void {
+    if (!this.personalities.has(playerId)) {
+      this.personalities.set(playerId, assignPersonality(role as any, faction as any, seed))
+    }
+    if (!this.memories.has(playerId)) {
+      this.memories.set(playerId, createMemory())
+    }
+  }
+
+  /** Feed events to update player memory */
+  feedEvent(playerId: string, event: GameEvent): void {
+    const mem = this.memories.get(playerId)
+    if (mem) {
+      this.memories.set(playerId, updateMemory(mem, event, playerId))
+    }
+  }
+
+  getPersonality(playerId: string): Personality | undefined {
+    return this.personalities.get(playerId)
+  }
+
+  getMemory(playerId: string): AgentMemory | undefined {
+    return this.memories.get(playerId)
+  }
+
   async generateAction(
     state: GameState,
     playerId: string,
-    task: "speech" | "vote" | "wolf_kill" | "seer_check" | "witch_action" | "last_words"
+    task: "speech" | "vote" | "wolf_kill" | "seer_check" | "witch_action" | "last_words",
+    events?: GameEvent[],
   ): Promise<{ command: Command; trace: AITrace }> {
-    const context = buildContext(state, playerId, task)
+    // Feed recent events to memory
+    if (events) {
+      for (const event of events) {
+        this.feedEvent(playerId, event)
+      }
+    }
+
+    const personality = this.personalities.get(playerId)
+    const memory = this.memories.get(playerId)
+    const context = buildContext(state, playerId, task, personality, memory)
     const result = await this.provider.generate(context.systemPrompt, context.userPrompt)
 
     // Build trace

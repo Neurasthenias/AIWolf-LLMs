@@ -1,5 +1,9 @@
 import type { GameState, PlayerView } from "@aiwolf/shared/types"
 import { buildPlayerView } from "@aiwolf/engine"
+import type { Personality } from "../personality"
+import { personalityToPrompt } from "../personality"
+import type { AgentMemory } from "../memory"
+import { memoryToPrompt } from "../memory"
 
 export interface AIContext {
   systemPrompt: string
@@ -12,40 +16,44 @@ export interface AIContext {
   }
 }
 
-/**
- * Context Builder — MVP: Context → Speak/Act
- * Think/Plan 隐式在 LLM 内完成
- */
 export function buildContext(
   state: GameState,
   playerId: string,
-  task: "speech" | "vote" | "wolf_kill" | "seer_check" | "witch_action" | "last_words"
+  task: "speech" | "vote" | "wolf_kill" | "seer_check" | "witch_action" | "last_words",
+  personality?: Personality,
+  memory?: AgentMemory,
 ): AIContext {
   const view = buildPlayerView(state, playerId)
   const role = view.self.role
 
-  const systemPrompt = loadSystemPrompt()
-  const rolePrompt = loadRolePrompt(role)
-  const phasePrompt = buildPhasePrompt(view, task)
+  const systemPrompt = [
+    loadSystemPrompt(),
+    personality ? personalityToPrompt(personality) : "",
+    loadRolePrompt(role),
+    buildPhasePrompt(view, task),
+  ].filter(Boolean).join("\n\n")
+
+  const memoryText = memory ? memoryToPrompt(memory, playerId) : ""
 
   const userPrompt = [
     `【你的身份】${role}，阵营${view.self.faction}`,
     `【当前阶段】${view.phase.type} ${view.phase.subPhase} 第${view.phase.dayNumber}天`,
     `【存活玩家】${view.players.filter(p => p.isAlive).map(p => `${p.name}(${p.id})`).join("、")}`,
     `【当前任务】${taskDescription(task)}`,
+    memoryText,
     ``,
     `请以 JSON 格式返回你的决策：`,
     `{"action":{"type":"...","targetId":"...","reason":"..."},"speech":{"content":"...","tone":"..."}}`,
-  ].join("\n")
+  ].filter(Boolean).join("\n")
 
   return {
-    systemPrompt: systemPrompt + "\n\n" + rolePrompt + "\n\n" + phasePrompt,
+    systemPrompt,
     userPrompt,
     role,
     phase: view.phase.subPhase,
     trace: {
       view,
-      promptTokensEstimate: (systemPrompt + rolePrompt + phasePrompt + userPrompt).length / 4,
+      promptTokensEstimate: (systemPrompt + userPrompt).length / 4,
     },
   }
 }
