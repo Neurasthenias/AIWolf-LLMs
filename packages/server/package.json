@@ -1,0 +1,17 @@
+{
+  "name": "@aiwolf/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@aiwolf/shared": "workspace:*",
+    "@aiwolf/engine": "workspace:*",
+    "@aiwolf/ai": "workspace:*",
+    "fastify": "^5",
+    "@fastify/websocket": "^11",
+    "socket.io": "^4"
+  }
+}

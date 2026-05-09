@@ -1,8 +1,0 @@
-{"id":"e1","version":"1.0","schemaVersion":"1.0","type":"room:player_joined","gameId":"g4","seq":1,"timestamp":1,"visibility":"public","payload":{"playerId":"p1","name":"A","seat":1}}
-{"id":"e2","version":"1.0","schemaVersion":"1.0","type":"role:assigned","gameId":"g4","seq":2,"timestamp":2,"visibility":"private","visibleTo":["p1"],"payload":{"playerId":"p1","role":"seer","faction":"good"}}
-{"id":"e3","version":"1.0","schemaVersion":"1.0","type":"phase:transitioned","gameId":"g4","seq":3,"timestamp":3,"visibility":"public","payload":{"from":"WAITING_PLAYERS","to":"NIGHT_ANNOUNCE","round":1}}
-{"id":"e4","version":"1.0","schemaVersion":"1.0","type":"death:player_died","gameId":"g4","seq":4,"timestamp":4,"visibility":"public","payload":{"playerId":"p2","cause":"WOLF_KILL","round":1}}
-{"id":"e1","version":"1.0","schemaVersion":"1.0","type":"room:player_joined","gameId":"g4","seq":1,"timestamp":1,"visibility":"public","payload":{"playerId":"p1","name":"A","seat":1}}
-{"id":"e2","version":"1.0","schemaVersion":"1.0","type":"role:assigned","gameId":"g4","seq":2,"timestamp":2,"visibility":"private","visibleTo":["p1"],"payload":{"playerId":"p1","role":"seer","faction":"good"}}
-{"id":"e3","version":"1.0","schemaVersion":"1.0","type":"phase:transitioned","gameId":"g4","seq":3,"timestamp":3,"visibility":"public","payload":{"from":"WAITING_PLAYERS","to":"NIGHT_ANNOUNCE","round":1}}
-{"id":"e4","version":"1.0","schemaVersion":"1.0","type":"death:player_died","gameId":"g4","seq":4,"timestamp":4,"visibility":"public","payload":{"playerId":"p2","cause":"WOLF_KILL","round":1}}
