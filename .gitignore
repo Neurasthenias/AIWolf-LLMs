@@ -3,6 +3,7 @@ dist/
 .turbo/
 *.tsbuildinfo
 .env
+.env.local
 *.log
 output/
 .obsidian/

@@ -5,22 +5,20 @@ import { GamePage } from "./pages/GamePage"
 export default function App() {
   const { connected, gameId, connect, joinRoom, playerName, setPlayerName, requestCatchup } = useGameStore()
   const [roomCode, setRoomCode] = useState("")
-  const [mode, setMode] = useState<"menu" | "create" | "join">("menu")
+  const [mode, setMode] = useState<"menu" | "join">("menu")
 
   const handleCreate = async () => {
     try {
       const res = await fetch("http://localhost:3001/api/rooms", { method: "POST" })
       const data = await res.json()
-      setRoomCode(data.gameId)
       if (!connected) connect("http://localhost:3001")
       setTimeout(async () => {
         joinRoom(data.gameId, "p1")
-        // Start game
         await fetch(`http://localhost:3001/api/rooms/${data.gameId}/start`, { method: "POST" })
         setTimeout(() => requestCatchup(), 500)
       }, 500)
     } catch {
-      alert("Cannot connect to server. Start server first: pnpm --filter @aiwolf/server dev")
+      alert("无法连接服务器。请先启动: pnpm --filter @aiwolf/server dev")
     }
   }
 
@@ -41,12 +39,8 @@ export default function App() {
 
         {mode === "menu" && (
           <div className="space-y-4">
-            <input
-              className="w-full p-3 rounded bg-gray-800 border border-gray-700 text-white"
-              placeholder="你的名字"
-              value={playerName}
-              onChange={e => setPlayerName(e.target.value)}
-            />
+            <input className="w-full p-3 rounded bg-gray-800 border border-gray-700 text-white"
+              placeholder="你的名字" value={playerName} onChange={e => setPlayerName(e.target.value)} />
             <button onClick={handleCreate} className="w-full p-3 rounded bg-amber-600 hover:bg-amber-500 font-bold">
               创建房间（单人模式）
             </button>
@@ -58,15 +52,9 @@ export default function App() {
 
         {mode === "join" && (
           <div className="space-y-4">
-            <input
-              className="w-full p-3 rounded bg-gray-800 border border-gray-700 text-white"
-              placeholder="房间号"
-              value={roomCode}
-              onChange={e => setRoomCode(e.target.value)}
-            />
-            <button onClick={handleJoin} className="w-full p-3 rounded bg-amber-600 hover:bg-amber-500 font-bold">
-              加入
-            </button>
+            <input className="w-full p-3 rounded bg-gray-800 border border-gray-700 text-white"
+              placeholder="房间号" value={roomCode} onChange={e => setRoomCode(e.target.value)} />
+            <button onClick={handleJoin} className="w-full p-3 rounded bg-amber-600 hover:bg-amber-500 font-bold">加入</button>
             <button onClick={() => setMode("menu")} className="w-full p-3 rounded bg-gray-700">返回</button>
           </div>
         )}

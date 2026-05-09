@@ -21,6 +21,18 @@ export class GameRuntime {
     this.eventStore = new FileEventStore()
   }
 
+  // ── AI Config ──
+
+  private aiConfig?: import("@aiwolf/ai").AIProviderConfig
+
+  setAIConfig(config: import("@aiwolf/ai").AIProviderConfig): void {
+    this.aiConfig = config
+  }
+
+  getAIConfig(): import("@aiwolf/ai").AIProviderConfig | undefined {
+    return this.aiConfig
+  }
+
   // ── Public API ──
 
   onEvent(cb: (event: GameEvent) => void): () => void {
