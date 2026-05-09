@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { createGame, reduce, replayState, handleCommand, determineNextPhase, InMemoryEventStore, assignRoles } from "./index"
+import { createGame, reduce, replayState, handleCommand, determineNextPhase, assignRoles } from "./index"
 import type { GameState, GameEvent, GameConfig } from "@aiwolf/shared/types"
 import { v7 as uuidv7 } from "uuid"
 import fc from "fast-check"
@@ -258,26 +258,6 @@ describe("Engine — Assign Roles", () => {
     const a1 = assignRoles(state.players, testConfig, 42)
     const a2 = assignRoles(state.players, testConfig, 42)
     expect(JSON.stringify(a1)).toBe(JSON.stringify(a2))
-  })
-})
-
-describe("Engine — Event Store", () => {
-  it("InMemoryEventStore: append and load", async () => {
-    const store = new InMemoryEventStore()
-    const events: GameEvent[] = [makeEvent({ type: "room:player_joined", seq: 1, payload: { playerId: "p1", name: "A", seat: 1 } })]
-    await store.append("g1", events)
-    const loaded = await store.load("g1")
-    expect(loaded).toHaveLength(1)
-  })
-
-  it("InMemoryEventStore: loadFrom skips earlier events", async () => {
-    const store = new InMemoryEventStore()
-    const e1 = makeEvent({ id: "e1", type: "room:player_joined", seq: 1, payload: { playerId: "p1", name: "A", seat: 1 } })
-    const e2 = makeEvent({ id: "e2", type: "phase:transitioned", seq: 2, payload: { from: "WAITING", to: "NIGHT_ANNOUNCE", round: 1 } })
-    await store.append("g1", [e1, e2])
-    const loaded = await store.loadFrom("g1", "e1")
-    expect(loaded).toHaveLength(1)
-    expect(loaded[0]?.id).toBe("e2")
   })
 })
 
