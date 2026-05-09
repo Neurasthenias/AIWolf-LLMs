@@ -3,7 +3,7 @@ import { useGameStore } from "./store/game"
 import { GamePage } from "./pages/GamePage"
 
 export default function App() {
-  const { connected, gameId, connect, joinRoom, playerName, setPlayerName } = useGameStore()
+  const { connected, gameId, connect, joinRoom, playerName, setPlayerName, requestCatchup } = useGameStore()
   const [roomCode, setRoomCode] = useState("")
   const [mode, setMode] = useState<"menu" | "create" | "join">("menu")
 
@@ -13,10 +13,12 @@ export default function App() {
       const data = await res.json()
       setRoomCode(data.gameId)
       if (!connected) connect("http://localhost:3001")
-      setTimeout(() => {
+      setTimeout(async () => {
         joinRoom(data.gameId, "p1")
-        setMode("menu")
-      }, 300)
+        // Start game
+        await fetch(`http://localhost:3001/api/rooms/${data.gameId}/start`, { method: "POST" })
+        setTimeout(() => requestCatchup(), 500)
+      }, 500)
     } catch {
       alert("Cannot connect to server. Start server first: pnpm --filter @aiwolf/server dev")
     }

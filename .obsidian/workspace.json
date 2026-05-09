@@ -178,6 +178,8 @@
   },
   "active": "4ddd730da5eacf4d",
   "lastOpenFiles": [
+    "apps/web/dist/assets/index-B2HzMz4n.js",
+    "vitest.config.ts.timestamp-1778322806101-be836b05bd691.mjs",
     "vitest.config.ts.timestamp-1778322084749-18fc687311d65.mjs",
     "vitest.config.ts.timestamp-1778322042487-910edd92669eb.mjs",
     "vitest.config.ts.timestamp-1778322034776-2c6af513a4a0b.mjs",
@@ -187,8 +189,6 @@
     "packages/ai/src/memory/index.ts",
     "packages/ai/src/personality/index.ts",
     "packages/ai/src/personality",
-    "packages/ai/src/memory",
-    "apps/web/dist/index.html",
     "EFFECT_RUNTIME.md",
     "docs/TECH_DESIGN.md",
     "docs/STATE_MACHINE_SPEC.md",
