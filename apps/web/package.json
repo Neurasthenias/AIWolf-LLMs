@@ -1,0 +1,17 @@
+{
+  "name": "@aiwolf/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build"
+  },
+  "dependencies": {
+    "@aiwolf/shared": "workspace:*",
+    "react": "^19",
+    "react-dom": "^19",
+    "zustand": "^5",
+    "socket.io-client": "^4"
+  }
+}
