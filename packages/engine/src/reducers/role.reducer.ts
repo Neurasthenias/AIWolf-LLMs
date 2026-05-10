@@ -22,8 +22,17 @@ export function reduceRole(state: GameState, event: GameEvent): { newState: Game
       }
     }
     case "role:teammates_revealed": {
-      // Teammates info is stored in events, not state — projection builds it
-      return { newState: state, effects }
+      const { playerId, teammates } = event.payload as { playerId: string; teammates: string[] }
+      return {
+        newState: {
+          ...state,
+          players: {
+            ...state.players,
+            [playerId]: { ...state.players[playerId]!, teammates },
+          },
+        },
+        effects,
+      }
     }
     case "role:seer_result": {
       // Result stored in events, projection surfaces it to seer

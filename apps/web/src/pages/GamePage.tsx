@@ -25,6 +25,7 @@ export function GamePage() {
   const isSeerPhase = phase.subPhase === "SEER_CHOOSE"
   const isWitchPhase = phase.subPhase === "WITCH_DECIDE"
   const canAct = (isWolfPhase && self.role === "werewolf") || (isSeerPhase && self.role === "seer") || (isWitchPhase && self.role === "witch")
+  const isGameOver = !!gameOver
 
   return (
     <div className={`min-h-screen ${isNight ? "bg-gray-950" : "bg-gray-900"} text-white`}>
@@ -138,8 +139,15 @@ export function GamePage() {
 
       {/* Bottom action bar */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-gray-900 border-t border-gray-800">
+        {/* Game over */}
+        {isGameOver && (
+          <div className="text-center text-amber-400 text-lg font-bold">
+            游戏结束 — {gameOver!.winner === "good" ? "好人阵营" : "狼人阵营"}获胜
+          </div>
+        )}
+
         {/* Speech input */}
-        {isSpeaking && self.isAlive && (
+        {!isGameOver && isSpeaking && self.isAlive && (
           <div className="flex gap-2">
             <input
               className="flex-1 p-3 rounded bg-gray-800 border border-gray-700 text-white"
@@ -159,7 +167,7 @@ export function GamePage() {
         )}
 
         {/* Vote panel */}
-        {isVoting && self.isAlive && (
+        {!isGameOver && isVoting && self.isAlive && (
           <div className="flex gap-2 flex-wrap">
             {players.filter(p => p.isAlive && p.id !== self.id).map(p => (
               <button key={p.id} onClick={() => sendVote(p.id)} className="px-3 py-2 bg-gray-700 rounded hover:bg-red-700 text-sm">
@@ -173,7 +181,7 @@ export function GamePage() {
         )}
 
         {/* Night action panel */}
-        {canAct && (
+        {!isGameOver && canAct && (
           <div className="flex gap-2 flex-wrap">
             <p className="w-full text-xs text-amber-400 mb-1">
               {isWolfPhase ? "选择击杀目标" : isSeerPhase ? "选择查验目标" : "选择行动"}
@@ -195,7 +203,7 @@ export function GamePage() {
         )}
 
         {/* Waiting state */}
-        {!isSpeaking && !isVoting && !canAct && !gameOver && (
+        {!isGameOver && !isSpeaking && !isVoting && !canAct && (
           <p className="text-center text-gray-500 text-sm">
             {isNight ? "🌙 夜晚阶段 — 等待中..." : "等待其他玩家..."}
           </p>
@@ -205,20 +213,30 @@ export function GamePage() {
   )
 }
 
-function phaseLabel(type: string, sub: string): string {
+function phaseLabel(_type: string, sub: string): string {
   const map: Record<string, string> = {
+    WAITING_PLAYERS: "等待玩家",
+    ROLE_ASSIGNMENT: "分配身份",
     NIGHT_ANNOUNCE: "天黑请闭眼",
     WOLF_INTEL: "狼人确认同伴",
     WOLF_PROPOSE: "狼人请行动",
+    WOLF_RESOLVE: "狼人决议",
     SEER_CHOOSE: "预言家请验人",
+    SEER_RESULT: "预言家得知结果",
+    WITCH_NOTIFY: "女巫收到通知",
     WITCH_DECIDE: "女巫请行动",
     NIGHT_SETTLEMENT: "夜晚结算",
     DAY_BREAK: "天亮了",
     DEATH_ANNOUNCE: "公布死讯",
+    CHECK_WIN: "判断胜负",
+    SPEECH_PRE_THINK: "准备发言",
     SPEECH_TURN_ACTIVE: "发言阶段",
     VOTE_CAST: "投票阶段",
     VOTE_REVEAL: "公布投票",
     EXILE_ANNOUNCE: "放逐结果",
+    DAY_SETTLEMENT: "白天结算",
+    RESULT_ANNOUNCE: "公布结果",
+    MVP_ANNOUNCE: "MVP公布",
   }
-  return map[sub] ?? `${type}/${sub}`
+  return map[sub] ?? `${_type}/${sub}`
 }

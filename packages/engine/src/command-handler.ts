@@ -85,6 +85,15 @@ export function handleCommand(command: Command, state: GameState): GameEvent[] {
         payload: { playerId: targetId, cause: "WOLF_KILL", round: state.phase.round },
       }]
     }
+    case "night:wolf_proposal_resolved": {
+      const { targetId } = command.payload as { targetId: string }
+      return [{
+        ...base, id: uuidv7(), seq: state.lastEventSeq + 1,
+        type: "wolf:proposal_resolved", visibility: "private" as const,
+        visibleTo: getWolfIds(state),
+        payload: { targetId },
+      }]
+    }
     case "night:seer_check": {
       const { targetId, result } = command.payload as { targetId: string; result: string }
       return [{
@@ -114,14 +123,26 @@ export function handleCommand(command: Command, state: GameState): GameEvent[] {
         type: "speech:completed", visibility: "public" as const,
         payload: { playerId: command.actorId, fullText: (command.payload as { content: string }).content, duration: 0 },
       }]
+    case "speech:set_speaker": {
+      const { playerId } = command.payload as { playerId: string }
+      return [{
+        ...base, id: uuidv7(), seq: state.lastEventSeq + 1,
+        type: "speech:speaker_changed", visibility: "public" as const,
+        payload: { playerId },
+      }]
+    }
 
     // ── Vote ──
-    case "vote:cast":
+    case "vote:cast": {
+      const payload = command.payload as { targetId: string | null }
+      // Reject self-vote
+      if (payload.targetId && payload.targetId === command.actorId) return []
       return [{
         ...base, id: uuidv7(), seq: state.lastEventSeq + 1,
         type: "vote:cast", visibility: "hidden" as const,
-        payload: { playerId: command.actorId, targetId: (command.payload as { targetId: string | null }).targetId },
+        payload: { playerId: command.actorId, targetId: payload.targetId },
       }]
+    }
 
     // ── Vote Reveal ──
     case "vote:reveal": {
@@ -151,6 +172,62 @@ export function handleCommand(command: Command, state: GameState): GameEvent[] {
         type: "death:player_died", visibility: "public" as const,
         payload: { playerId, cause: "VOTE_EXILE", round: state.phase.round },
       }]
+    }
+
+    // ── Witch Resolve ──
+    case "night:witch_resolve": {
+      const { saveTargetId, poisonTargetId, wolfKillTargetId } = command.payload as {
+        saveTargetId?: string; poisonTargetId?: string; wolfKillTargetId?: string
+      }
+      const events: GameEvent[] = []
+      let seq = state.lastEventSeq
+      // Apply poison
+      if (poisonTargetId) {
+        seq++
+        events.push({
+          ...base, id: uuidv7(), seq,
+          type: "death:player_died", visibility: "public" as const,
+          payload: { playerId: poisonTargetId, cause: "WITCH_POISON", round: state.phase.round },
+        })
+      }
+      // Wolf kill (only if not saved)
+      if (wolfKillTargetId && wolfKillTargetId !== saveTargetId) {
+        seq++
+        events.push({
+          ...base, id: uuidv7(), seq,
+          type: "death:player_died", visibility: "public" as const,
+          payload: { playerId: wolfKillTargetId, cause: "WOLF_KILL", round: state.phase.round },
+        })
+      }
+      // Announce safe night if saved
+      if (saveTargetId && saveTargetId === wolfKillTargetId) {
+        seq++
+        events.push({
+          ...base, id: uuidv7(), seq,
+          type: "witch:saved", visibility: "public" as const,
+          payload: { playerId: saveTargetId },
+        })
+      }
+      return events
+    }
+
+    // ── Vote Tally ──
+    case "vote:tally": {
+      const alive = Object.values(state.players).filter(p => p.isAlive)
+      const tally: Record<string, number> = {}
+      for (const p of alive) {
+        if (p.voteTargetId) {
+          tally[p.voteTargetId] = (tally[p.voteTargetId] ?? 0) + 1
+        }
+      }
+      const maxVotes = Math.max(0, ...Object.values(tally))
+      const topIds = Object.entries(tally).filter(([, c]) => c === maxVotes).map(([id]) => id)
+      const exiledPlayerId = maxVotes > 0 ? topIds.sort()[0]! : null
+      return exiledPlayerId ? [{
+        ...base, id: uuidv7(), seq: state.lastEventSeq + 1,
+        type: "death:player_died", visibility: "public" as const,
+        payload: { playerId: exiledPlayerId, cause: "VOTE_EXILE", round: state.phase.round },
+      }] : []
     }
 
     // ── End Game ──

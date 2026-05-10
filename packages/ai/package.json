@@ -9,7 +9,7 @@
   "dependencies": {
     "@aiwolf/shared": "workspace:*",
     "@aiwolf/engine": "workspace:*",
-    "openai": "^4",
+    "openai": "^6",
     "zod": "^3"
   }
 }

@@ -26,6 +26,8 @@ interface GameStore {
   reset: () => void
 }
 
+let catchupDebounce: ReturnType<typeof setTimeout> | null = null
+
 export const useGameStore = create<GameStore>((set, get) => ({
   socket: null,
   connected: false,
@@ -42,6 +44,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
     socket.on("disconnect", () => set({ connected: false }))
     socket.on("game:event", (event: GameEvent) => {
       set(s => ({ events: [...s.events, event] }))
+      // Debounce catchup to refresh the view after events arrive
+      if (catchupDebounce) clearTimeout(catchupDebounce)
+      catchupDebounce = setTimeout(() => {
+        const { socket: s, gameId, playerId } = get()
+        if (s && gameId && playerId) {
+          s.emit("game:catchup", { gameId, playerId, fromSeq: 0 })
+        }
+      }, 100)
     })
     socket.on("game:state_snapshot", (data: { seq: number; view: PlayerView }) => {
       set({ view: data.view })

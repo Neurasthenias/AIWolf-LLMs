@@ -14,7 +14,7 @@ export function createGame(config: GameConfig): GameState {
       role: "villager",
       faction: "good",
       isAlive: true,
-      isAI: false,
+      isAI: seat !== 1,
       isHost: seat === 1,
     }
   }
@@ -30,5 +30,6 @@ export function createGame(config: GameConfig): GameState {
     tieBreakCount: 0,
     startedAt: Date.now(),
     lastEventSeq: 0,
+    speeches: [],
   }
 }

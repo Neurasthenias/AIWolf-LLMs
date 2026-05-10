@@ -58,6 +58,62 @@ export function reducePhase(state: GameState, event: GameEvent): { newState: Gam
         ],
       }
     }
+    case "speech:completed": {
+      const { playerId, fullText } = event.payload as { playerId: string; fullText: string; duration: number }
+      return {
+        newState: {
+          ...state,
+          speeches: [...state.speeches, { playerId, content: fullText, timestamp: event.timestamp, round: state.phase.round }],
+        },
+        effects,
+      }
+    }
+    case "speech:speaker_changed": {
+      const { playerId } = event.payload as { playerId: string }
+      return {
+        newState: { ...state, currentSpeakerId: playerId },
+        effects: [],
+      }
+    }
+    case "wolf:proposal_submitted": {
+      const { playerId, targetId } = event.payload as { playerId: string; targetId: string }
+      return {
+        newState: {
+          ...state,
+          wolfProposals: [...(state.wolfProposals ?? []), { wolfId: playerId, targetId }],
+        },
+        effects,
+      }
+    }
+    case "wolf:proposal_resolved": {
+      const { targetId } = event.payload as { targetId: string }
+      return {
+        newState: {
+          ...state,
+          resolvedWolfTarget: targetId,
+        },
+        effects,
+      }
+    }
+    case "witch:action_submitted": {
+      const { saveTargetId, poisonTargetId } = event.payload as { playerId: string; saveTargetId?: string; poisonTargetId?: string }
+      return {
+        newState: {
+          ...state,
+          witchActions: { saveTargetId, poisonTargetId },
+        },
+        effects,
+      }
+    }
+    case "game:ended": {
+      return {
+        newState: {
+          ...state,
+          phase: { type: "GAME_OVER", subPhase: "RESULT_ANNOUNCE", round: state.phase.round, dayNumber: state.phase.dayNumber },
+        },
+        effects,
+      }
+    }
     default:
       return { newState: state, effects }
   }

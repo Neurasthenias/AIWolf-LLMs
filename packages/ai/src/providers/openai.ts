@@ -27,6 +27,20 @@ export const AIIntentSchema = z.object({
 
 export type AIIntent = z.infer<typeof AIIntentSchema>
 
+const ACTION_CN_MAP: Record<string, string> = {
+  "投票": "vote", "投": "vote",
+  "击杀": "wolf_kill", "杀": "wolf_kill", "刀": "wolf_kill",
+  "查验": "seer_check", "查": "seer_check",
+  "救人": "witch_save", "救": "witch_save", "使用解药": "witch_save",
+  "毒杀": "witch_poison", "毒": "witch_poison", "使用毒药": "witch_poison",
+  "自爆": "self_explode",
+  "跳过": "skip", "空过": "skip",
+}
+
+function normalizeActionType(type: string): string {
+  return ACTION_CN_MAP[type] ?? type
+}
+
 export class AIProvider {
   private client: OpenAI
   private model: string
@@ -42,11 +56,12 @@ export class AIProvider {
     })
     this.model = config.model
     this.temperature = config.temperature ?? 0.7
-    this.maxTokens = config.maxTokens ?? 1024
+    this.maxTokens = config.maxTokens ?? 4096
   }
 
   async generate(systemPrompt: string, userPrompt: string): Promise<{
     raw: string
+    reasoning: string
     intent: AIIntent | null
     parseError?: string
     usage: { promptTokens: number; completionTokens: number; totalTokens: number }
@@ -66,23 +81,29 @@ export class AIProvider {
     })
 
     const latencyMs = Date.now() - start
-    const raw = response.choices[0]?.message?.content ?? ""
+    const msg = response.choices[0]?.message
+    const raw = (msg as Record<string, unknown> | null | undefined)?.content as string ?? ""
+    const reasoning = (msg as Record<string, unknown> | null | undefined)?.reasoning_content as string ?? ""
     const usage = {
       promptTokens: response.usage?.prompt_tokens ?? 0,
       completionTokens: response.usage?.completion_tokens ?? 0,
       totalTokens: response.usage?.total_tokens ?? 0,
     }
 
-    // Parse structured output
+    // Parse structured output with Chinese action normalization
     let intent: AIIntent | null = null
     let parseError: string | undefined
     try {
       const parsed = JSON.parse(raw)
+      // Normalize Chinese action types to English
+      if (parsed?.action?.type) {
+        parsed.action.type = normalizeActionType(parsed.action.type)
+      }
       intent = AIIntentSchema.parse(parsed)
     } catch (err) {
       parseError = (err as Error).message
     }
 
-    return { raw, intent, parseError, usage, latencyMs }
+    return { raw, intent, parseError, usage, latencyMs, reasoning }
   }
 }

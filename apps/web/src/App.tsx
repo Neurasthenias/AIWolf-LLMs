@@ -1,11 +1,15 @@
 import { useState } from "react"
 import { useGameStore } from "./store/game"
 import { GamePage } from "./pages/GamePage"
+import { LogViewer } from "./pages/LogViewer"
+
+type Screen = "menu" | "join" | "game" | "logs"
 
 export default function App() {
   const { connected, gameId, connect, joinRoom, playerName, setPlayerName, requestCatchup } = useGameStore()
   const [roomCode, setRoomCode] = useState("")
   const [mode, setMode] = useState<"menu" | "join">("menu")
+  const [screen, setScreen] = useState<Screen>("menu")
 
   const handleCreate = async () => {
     try {
@@ -17,6 +21,7 @@ export default function App() {
         await fetch(`http://localhost:3001/api/rooms/${data.gameId}/start`, { method: "POST" })
         setTimeout(() => requestCatchup(), 500)
       }, 500)
+      setScreen("game")
     } catch {
       alert("无法连接服务器。请先启动: pnpm --filter @aiwolf/server dev")
     }
@@ -25,10 +30,14 @@ export default function App() {
   const handleJoin = () => {
     if (!roomCode) return
     if (!connected) connect("http://localhost:3001")
-    setTimeout(() => joinRoom(roomCode, "p1"), 300)
+    setTimeout(() => { joinRoom(roomCode, "p1"); setScreen("game") }, 300)
   }
 
-  if (gameId && connected) {
+  if (screen === "logs") {
+    return <LogViewer onBack={() => setScreen("menu")} />
+  }
+
+  if (screen === "game" && gameId && connected) {
     return <GamePage />
   }
 
@@ -46,6 +55,9 @@ export default function App() {
             </button>
             <button onClick={() => setMode("join")} className="w-full p-3 rounded bg-gray-700 hover:bg-gray-600">
               加入房间
+            </button>
+            <button onClick={() => setScreen("logs")} className="w-full p-3 rounded bg-gray-700 hover:bg-gray-600">
+              📋 对局日志
             </button>
           </div>
         )}

@@ -104,19 +104,22 @@ async function runSingleGame(seed: number): Promise<SimResult> {
         // Simulate vote
         if (subPhase === "VOTE_CAST") {
           const alive = Object.values(state.players).filter(p => p.isAlive)
-          const wolves = alive.filter(p => p.faction === "wolf")
-          const goods = alive.filter(p => p.faction === "good")
 
-          // Rule-based: each player votes randomly
           const votes: { playerId: string; targetId: string | null }[] = []
           for (const p of alive) {
-            const candidates = p.faction === "wolf"
-              ? goods.filter(g => g.id !== p.id)
-              : alive.filter(a => a.id !== p.id)
-            const target = candidates.length > 0 ? candidates[(round + seed + p.seat) % candidates.length]! : null
-            votes.push({ playerId: p.id, targetId: target?.id ?? null })
+            const candidates = alive.filter(a => a.id !== p.id)
+            let targetId: string | null = null
+            if (candidates.length > 0) {
+              if (p.faction === "wolf") {
+                const goods = candidates.filter(c => c.faction === "good")
+                targetId = goods.length > 0 ? goods[(round + seed + p.seat) % goods.length]!.id : candidates[(round + seed + p.seat) % candidates.length]!.id
+              } else {
+                targetId = candidates[(round + seed + p.seat) % candidates.length]!.id
+              }
+            }
+            votes.push({ playerId: p.id, targetId })
 
-            const voteCmd = { id: uuidv7(), version: "1.0", type: "vote:cast", gameId, actorId: p.id, timestamp: Date.now(), payload: { targetId: target?.id ?? null } }
+            const voteCmd = { id: uuidv7(), version: "1.0", type: "vote:cast", gameId, actorId: p.id, timestamp: Date.now(), payload: { targetId } }
             const evts = handleCommand(voteCmd, state)
             events.push(...evts)
             state = replayState(evts, state)
@@ -129,12 +132,19 @@ async function runSingleGame(seed: number): Promise<SimResult> {
           state = replayState(revEvts, state)
         }
 
-        // Simulate exile
+        // Simulate exile — tally votes and exile the player with most votes
         if (subPhase === "EXILE_ANNOUNCE") {
           const alive = Object.values(state.players).filter(p => p.isAlive)
-          // Exile the player with most votes (simplified: pick a wolf if exists, else random)
-          const target = alive.find(p => p.faction === "wolf") ?? alive[(round + seed) % alive.length]!
-          const exileCmd = { id: uuidv7(), version: "1.0", type: "player:exile", gameId, actorId: "system", timestamp: Date.now(), payload: { playerId: target.id } }
+          const tally: Record<string, number> = {}
+          for (const p of alive) {
+            if (p.voteTargetId) {
+              tally[p.voteTargetId] = (tally[p.voteTargetId] ?? 0) + 1
+            }
+          }
+          const maxVotes = Math.max(0, ...Object.values(tally))
+          const topIds = Object.entries(tally).filter(([, c]) => c === maxVotes).map(([id]) => id)
+          const targetId = maxVotes > 0 ? topIds.sort()[0]! : alive[(round + seed) % alive.length]!.id
+          const exileCmd = { id: uuidv7(), version: "1.0", type: "player:exile", gameId, actorId: "system", timestamp: Date.now(), payload: { playerId: targetId } }
           const evts = handleCommand(exileCmd, state)
           events.push(...evts)
           state = replayState(evts, state)

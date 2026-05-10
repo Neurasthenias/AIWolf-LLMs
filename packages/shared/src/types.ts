@@ -51,6 +51,18 @@ export interface Command {
 
 // ── State ──
 
+export interface SpeechRecord {
+  playerId: string
+  content: string
+  timestamp: number
+  round: number
+}
+
+export interface VoteTally {
+  votes: Record<string, string | null>
+  exiledPlayerId?: string
+}
+
 export interface GameState {
   gameId: string
   version: string
@@ -66,6 +78,11 @@ export interface GameState {
   startedAt: number
   lastEventSeq: number
   gameOver?: { winner: FactionType; mvp: string; svp: string }
+  speeches: SpeechRecord[]
+  currentVoteTally?: VoteTally
+  witchActions?: { saveTargetId?: string; poisonTargetId?: string }
+  wolfProposals?: { wolfId: string; targetId: string }[]
+  resolvedWolfTarget?: string
 }
 
 export interface PhaseDetail {
@@ -86,6 +103,7 @@ export interface PlayerState {
   isHost: boolean
   deathInfo?: { cause: DeathCause; round: number; killedBy?: string }
   voteTargetId?: string | null
+  teammates?: string[]
 }
 
 export interface DeathAnnouncement {

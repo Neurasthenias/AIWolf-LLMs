@@ -23,6 +23,7 @@ export function buildPlayerView(state: GameState, playerId: string): PlayerView 
       role: player.role,
       faction: player.faction,
       isAlive: player.isAlive,
+      teammates: player.teammates,
     },
     players: publicPlayers,
     phase: {
@@ -30,8 +31,12 @@ export function buildPlayerView(state: GameState, playerId: string): PlayerView 
       subPhase: state.phase.subPhase,
       round: state.phase.round,
       dayNumber: state.phase.dayNumber,
+      currentSpeakerId: state.currentSpeakerId,
     },
-    speeches: [],
+    speeches: state.speeches ?? [],
+    voteResult: state.currentVoteTally,
+    deathAnnouncement: state.latestDeathAnnouncement,
+    gameOver: state.gameOver,
   }
 }
 

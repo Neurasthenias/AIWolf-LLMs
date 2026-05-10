@@ -13,6 +13,7 @@ export interface AITrace {
   timestamp: number
   context: Record<string, unknown>
   rawResponse: string
+  reasoning: string
   parsedIntent: AIIntent | null
   parseError?: string
   usage: { promptTokens: number; completionTokens: number; totalTokens: number }
@@ -84,6 +85,7 @@ export class AIPipeline {
       timestamp: Date.now(),
       context: { systemPrompt: context.systemPrompt, userPrompt: context.userPrompt },
       rawResponse: result.raw,
+      reasoning: result.reasoning,
       parsedIntent: result.intent,
       parseError: result.parseError,
       usage: result.usage,
