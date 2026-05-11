@@ -6,10 +6,23 @@
 import { runAISimulation } from "./src/ai-simulation"
 import * as fs from "node:fs"
 
+if (!process.env.OPENAI_API_KEY) {
+  console.error("OPENAI_API_KEY is required for quality-test.ts")
+  process.exit(1)
+}
+
+const baseURL = process.env.OPENAI_BASE_URL || "https://api.deepseek.com/v1"
+const model = process.env.OPENAI_MODEL || "deepseek-v4-flash"
+const isDeepSeek = process.env.OPENAI_PROVIDER === "deepseek" || baseURL.includes("deepseek") || model.startsWith("deepseek")
 const config = {
-  apiKey: "sk-8005f49d1ba6429da3e77203fc5ebe90",
-  baseURL: "https://api.deepseek.com/v1",
-  model: "deepseek-v4-flash",
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL,
+  model,
+  provider: isDeepSeek ? "deepseek" as const : "openai-compatible" as const,
+  thinking: {
+    enabled: process.env.AI_THINKING_ENABLED ? process.env.AI_THINKING_ENABLED === "true" : model === "deepseek-v4-flash",
+    effort: process.env.AI_REASONING_EFFORT === "max" ? "max" as const : "high" as const,
+  },
 }
 
 const SAVEDIR = "../../.data/games/quality-test"

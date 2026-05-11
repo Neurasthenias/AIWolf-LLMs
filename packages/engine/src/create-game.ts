@@ -22,6 +22,7 @@ export function createGame(config: GameConfig): GameState {
   return {
     gameId,
     version: "1.0",
+    config,
     phase: { type: "WAITING", subPhase: "WAITING_PLAYERS", round: 1, dayNumber: 1 },
     players,
     witchPotions: { hasSave: true, hasPoison: true },

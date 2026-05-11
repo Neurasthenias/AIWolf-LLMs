@@ -11,3 +11,4 @@ export type {
   GameState, GameEvent, Command, Effect, ReducerResult,
   GameConfig, PlayerState, PhaseDetail, DeathAnnouncement,
 } from "@aiwolf/shared/types"
+export type { PlayerView, PlayerGuidance, PublicPlayer } from "./types"

@@ -21,6 +21,9 @@ try {
 const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001
 const DEFAULT_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"
 const DEFAULT_BASE_URL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1"
+const IS_DEEPSEEK = process.env.OPENAI_PROVIDER === "deepseek" || DEFAULT_BASE_URL.includes("deepseek") || DEFAULT_MODEL.startsWith("deepseek")
+const THINKING_ENABLED = process.env.AI_THINKING_ENABLED ? process.env.AI_THINKING_ENABLED === "true" : DEFAULT_MODEL === "deepseek-v4-flash"
+const REASONING_EFFORT = process.env.AI_REASONING_EFFORT === "max" ? "max" as const : "high" as const
 
 const app = Fastify({ logger: false })
 await app.register(cors, { origin: true })
@@ -81,8 +84,13 @@ app.post("/api/simulate", async (req, reply) => {
 
   const config = hasKey ? {
     apiKey: process.env.OPENAI_API_KEY!,
-    baseURL: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
-    model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+    baseURL: DEFAULT_BASE_URL,
+    model: DEFAULT_MODEL,
+    provider: IS_DEEPSEEK ? "deepseek" as const : "openai-compatible" as const,
+    thinking: {
+      enabled: THINKING_ENABLED,
+      effort: REASONING_EFFORT,
+    },
   } : undefined
 
   const results = await runAISimulation(count, config)
@@ -103,6 +111,9 @@ app.get("/api/config", async (_req, reply) => {
   return reply.send({
     aiEnabled: hasKey,
     model: DEFAULT_MODEL,
+    provider: IS_DEEPSEEK ? "deepseek" : "openai-compatible",
+    thinkingEnabled: THINKING_ENABLED,
+    reasoningEffort: REASONING_EFFORT,
     mode: hasKey ? "LLM" : "rule-based (no API key configured)",
     hint: hasKey ? "" : "Set OPENAI_API_KEY env var to enable LLM AI",
   })
@@ -174,21 +185,12 @@ app.get("/api/logs/games/:gameId", async (req, reply) => {
     }
   }
 
-  // Load traces — try exact gameId match, fall back to recent traces
+  // Load traces — strict gameId match only, no cross-game fallback
   const traces: unknown[] = []
   const tracesDir = path.join(baseData, "traces")
   if (fs.existsSync(tracesDir)) {
-    const traceFiles = fs.readdirSync(tracesDir).filter(f => f.endsWith(".jsonl"))
-    // First try: exact match
-    for (const f of traceFiles) {
-      if (f.startsWith(gameId)) {
-        loadTraceFile(path.join(tracesDir, f), traces)
-      }
-    }
-    // Fallback: if no traces found by gameId, load all recent ones (last 200 traces)
-    if (traces.length === 0 && traceFiles.length > 0) {
-      const recent = traceFiles.sort().reverse().slice(0, 10)
-      for (const f of recent) {
+    for (const f of fs.readdirSync(tracesDir)) {
+      if (f.startsWith(gameId) && f.endsWith(".jsonl")) {
         loadTraceFile(path.join(tracesDir, f), traces)
       }
     }

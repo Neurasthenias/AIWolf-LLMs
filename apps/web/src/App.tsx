@@ -3,34 +3,50 @@ import { useGameStore } from "./store/game"
 import { GamePage } from "./pages/GamePage"
 import { LogViewer } from "./pages/LogViewer"
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:3001"
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL ?? "http://localhost:3001"
+
 type Screen = "menu" | "join" | "game" | "logs"
 
 export default function App() {
-  const { connected, gameId, connect, joinRoom, playerName, setPlayerName, requestCatchup } = useGameStore()
+  const { connected, connecting, gameId, connect, joinRoom, playerName, setPlayerName, requestCatchup } = useGameStore()
   const [roomCode, setRoomCode] = useState("")
   const [mode, setMode] = useState<"menu" | "join">("menu")
   const [screen, setScreen] = useState<Screen>("menu")
 
+  const ensureConnected = async () => {
+    const store = useGameStore.getState()
+    if (store.connected) return
+    if (!store.socket) {
+      await connect(SOCKET_URL)
+    }
+  }
+
   const handleCreate = async () => {
     try {
-      const res = await fetch("http://localhost:3001/api/rooms", { method: "POST" })
+      const res = await fetch(`${API_BASE}/api/rooms`, { method: "POST" })
       const data = await res.json()
-      if (!connected) connect("http://localhost:3001")
-      setTimeout(async () => {
-        joinRoom(data.gameId, "p1")
-        await fetch(`http://localhost:3001/api/rooms/${data.gameId}/start`, { method: "POST" })
-        setTimeout(() => requestCatchup(), 500)
-      }, 500)
+      await ensureConnected()
+      joinRoom(data.gameId, "p1")
+      await fetch(`${API_BASE}/api/rooms/${data.gameId}/start`, { method: "POST" })
+      // Wait for server to process start + role assignment, then grab state
+      await new Promise(r => setTimeout(r, 300))
+      requestCatchup()
       setScreen("game")
     } catch {
       alert("无法连接服务器。请先启动: pnpm --filter @aiwolf/server dev")
     }
   }
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (!roomCode) return
-    if (!connected) connect("http://localhost:3001")
-    setTimeout(() => { joinRoom(roomCode, "p1"); setScreen("game") }, 300)
+    try {
+      await ensureConnected()
+      joinRoom(roomCode, "p1")
+      setScreen("game")
+    } catch {
+      alert("无法连接服务器")
+    }
   }
 
   if (screen === "logs") {
@@ -50,8 +66,9 @@ export default function App() {
           <div className="space-y-4">
             <input className="w-full p-3 rounded bg-gray-800 border border-gray-700 text-white"
               placeholder="你的名字" value={playerName} onChange={e => setPlayerName(e.target.value)} />
-            <button onClick={handleCreate} className="w-full p-3 rounded bg-amber-600 hover:bg-amber-500 font-bold">
-              创建房间（单人模式）
+            <button onClick={handleCreate} disabled={connecting}
+              className="w-full p-3 rounded bg-amber-600 hover:bg-amber-500 font-bold disabled:opacity-50">
+              {connecting ? "连接中..." : "创建房间（单人模式）"}
             </button>
             <button onClick={() => setMode("join")} className="w-full p-3 rounded bg-gray-700 hover:bg-gray-600">
               加入房间
@@ -66,12 +83,15 @@ export default function App() {
           <div className="space-y-4">
             <input className="w-full p-3 rounded bg-gray-800 border border-gray-700 text-white"
               placeholder="房间号" value={roomCode} onChange={e => setRoomCode(e.target.value)} />
-            <button onClick={handleJoin} className="w-full p-3 rounded bg-amber-600 hover:bg-amber-500 font-bold">加入</button>
+            <button onClick={handleJoin} disabled={connecting}
+              className="w-full p-3 rounded bg-amber-600 hover:bg-amber-500 font-bold disabled:opacity-50">
+              {connecting ? "连接中..." : "加入"}
+            </button>
             <button onClick={() => setMode("menu")} className="w-full p-3 rounded bg-gray-700">返回</button>
           </div>
         )}
 
-        {!connected && mode !== "menu" && (
+        {!connected && !connecting && mode !== "menu" && (
           <p className="text-red-400 text-center text-sm">未连接到服务器</p>
         )}
       </div>

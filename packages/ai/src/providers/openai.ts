@@ -9,11 +9,27 @@ export interface AIProviderConfig {
   apiKey: string
   baseURL?: string
   model: string
+  provider?: "deepseek" | "openai-compatible"
+  thinking?: {
+    enabled: boolean
+    effort?: "high" | "max"
+  }
   temperature?: number
   maxTokens?: number
 }
 
 export const AIIntentSchema = z.object({
+  analysis: z.object({
+    knownFacts: z.array(z.string()).default([]),
+    privateFacts: z.array(z.string()).default([]),
+    suspicions: z.array(z.object({
+      playerId: z.string(),
+      score: z.number().min(0).max(1),
+      reason: z.string(),
+    })).default([]),
+    strategy: z.string().default(""),
+    risk: z.string().default(""),
+  }).optional(),
   action: z.object({
     type: z.enum(["vote", "wolf_kill", "seer_check", "witch_save", "witch_poison", "self_explode", "skip"]),
     targetId: z.string().nullable(),
@@ -44,6 +60,8 @@ function normalizeActionType(type: string): string {
 export class AIProvider {
   private client: OpenAI
   private model: string
+  private provider?: AIProviderConfig["provider"]
+  private thinking?: AIProviderConfig["thinking"]
   private temperature: number
   private maxTokens: number
 
@@ -55,6 +73,8 @@ export class AIProvider {
       timeout: 60000,
     })
     this.model = config.model
+    this.provider = config.provider
+    this.thinking = config.thinking
     this.temperature = config.temperature ?? 0.7
     this.maxTokens = config.maxTokens ?? 4096
   }
@@ -65,29 +85,55 @@ export class AIProvider {
     intent: AIIntent | null
     parseError?: string
     usage: { promptTokens: number; completionTokens: number; totalTokens: number }
+    meta: {
+      model: string
+      provider: string
+      thinkingEnabled: boolean
+      reasoningEffort?: "high" | "max"
+      reasoningContentLength: number
+      finishReason?: string
+    }
     latencyMs: number
   }> {
     const start = Date.now()
+    const thinkingEnabled = !!this.thinking?.enabled
 
-    const response = await this.client.chat.completions.create({
+    const request: Record<string, unknown> = {
       model: this.model,
-      temperature: this.temperature,
       max_tokens: this.maxTokens,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-    })
+    }
+
+    if (thinkingEnabled) {
+      request.reasoning_effort = this.thinking?.effort ?? "high"
+      request.thinking = { type: "enabled" }
+    } else {
+      request.temperature = this.temperature
+    }
+
+    const response = await this.client.chat.completions.create(request as unknown as Parameters<typeof this.client.chat.completions.create>[0]) as any
 
     const latencyMs = Date.now() - start
     const msg = response.choices[0]?.message
     const raw = (msg as Record<string, unknown> | null | undefined)?.content as string ?? ""
     const reasoning = (msg as Record<string, unknown> | null | undefined)?.reasoning_content as string ?? ""
+    const finishReason = response.choices[0]?.finish_reason ?? undefined
     const usage = {
       promptTokens: response.usage?.prompt_tokens ?? 0,
       completionTokens: response.usage?.completion_tokens ?? 0,
       totalTokens: response.usage?.total_tokens ?? 0,
+    }
+    const meta = {
+      model: this.model,
+      provider: this.provider ?? "openai-compatible",
+      thinkingEnabled,
+      ...(this.thinking?.effort ? { reasoningEffort: this.thinking.effort } : {}),
+      reasoningContentLength: reasoning.length,
+      ...(finishReason ? { finishReason } : {}),
     }
 
     // Parse structured output with Chinese action normalization
@@ -104,6 +150,14 @@ export class AIProvider {
       parseError = (err as Error).message
     }
 
-    return { raw, intent, parseError, usage, latencyMs, reasoning }
+    return {
+      raw,
+      intent,
+      ...(parseError ? { parseError } : {}),
+      usage,
+      latencyMs,
+      reasoning,
+      meta,
+    }
   }
 }

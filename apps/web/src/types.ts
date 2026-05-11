@@ -5,11 +5,21 @@ export interface PlayerView {
   playerId: string
   self: { id: string; name: string; seat: number; role: string; faction: string; isAlive: boolean; teammates?: string[] }
   players: { id: string; name: string; seat: number; isAlive: boolean; isAI: boolean }[]
-  phase: { type: PhaseType; subPhase: SubPhaseType; round: number; dayNumber: number; currentSpeakerId?: string }
+  phase: { type: PhaseType; subPhase: SubPhaseType; round: number; dayNumber: number; currentSpeakerId?: string; deadline?: number }
+  guidance?: {
+    title: string
+    description: string
+    yourTurn: boolean
+    waitingFor: string[]
+    nextStep: string
+    progress: { current: number; total: number; label: string }
+    allowedActions: { type: string; label: string; requiresTarget: boolean }[]
+  }
   speeches: { playerId: string; content: string; timestamp: number }[]
   voteResult?: { votes: Record<string, string | null>; exiledPlayerId?: string }
   deathAnnouncement?: { deaths: { playerId: string; cause: string }[]; isSafeNight: boolean }
   gameOver?: { winner: string; mvp: string; svp: string }
+  wolfConsensus?: { proposals: { wolfId: string; targetId: string; reason: string }[]; resolvedTarget?: string }
 }
 
 export interface GameEvent {

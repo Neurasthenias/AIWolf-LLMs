@@ -4,7 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "pnpm --parallel --filter @aiwolf/server --filter @aiwolf/web dev",
+    "dev:server": "pnpm --filter @aiwolf/server dev",
+    "dev:web": "pnpm --filter @aiwolf/web dev",
+    "build": "pnpm --filter @aiwolf/web build",
+    "test": "vitest run",
+    "test:engine": "pnpm --filter @aiwolf/engine test"
   },
   "keywords": [],
   "author": "",

@@ -1,5 +1,5 @@
-import type { GameState, PlayerView } from "@aiwolf/shared/types"
-import { buildPlayerView } from "@aiwolf/engine"
+import type { GameState } from "@aiwolf/shared/types"
+import { buildPlayerView, type PlayerView } from "@aiwolf/engine"
 import type { Personality } from "../personality"
 import { personalityToPrompt } from "../personality"
 import type { AgentMemory } from "../memory"
@@ -42,8 +42,8 @@ export function buildContext(
     `【当前任务】${taskDescription(task)}`,
     memoryText,
     ``,
-    `请以 JSON 格式返回你的决策：`,
-    `{"action":{"type":"...","targetId":"...","reason":"..."},"speech":{"content":"...","tone":"..."}}`,
+    `请以 JSON 格式返回你的决策，必须是合法 json，不要输出 markdown：`,
+    `{"analysis":{"knownFacts":["公开事实"],"privateFacts":["仅自己可见的信息"],"suspicions":[{"playerId":"p2","score":0.7,"reason":"怀疑理由"}],"strategy":"本轮策略","risk":"暴露或误伤风险"},"action":{"type":"...","targetId":"...","reason":"..."},"speech":{"content":"...","tone":"..."}}`,
   ].filter(Boolean).join("\n")
 
   return {
@@ -73,10 +73,17 @@ function taskDescription(task: string): string {
 // ── Prompt 加载（MVP: 硬编码，Phase 2 走文件） ──
 
 function loadSystemPrompt(): string {
-  return `你是狼人杀游戏中的一名AI玩家。你必须严格遵守JSON输出格式，只输出合法的JSON对象。
+  return `你是狼人杀游戏中的一名AI玩家。你必须严格遵守 JSON 输出格式，只输出合法的 json 对象。
 
 输出格式：
 {
+  "analysis": {
+    "knownFacts": ["你基于公开信息确认的事实"],
+    "privateFacts": ["仅自己知道、不能在公开发言中泄露的信息"],
+    "suspicions": [{ "playerId": "玩家ID", "score": 0.0-1.0, "reason": "怀疑或信任理由" }],
+    "strategy": "你这一轮的真实策略",
+    "risk": "这次行动或发言可能带来的风险"
+  },
   "action": { "type": "投票/击杀/查验/救人/毒杀/跳过", "targetId": "玩家ID或null", "reason": "简短理由" },
   "speech": { "content": "你的发言内容（150-400字）", "tone": "激进/温和/困惑" }
 }
@@ -85,7 +92,8 @@ function loadSystemPrompt(): string {
 - 不能暴露自己的真实身份（除非是自爆狼人）
 - 狼人不能暴露同伴
 - 预言家只能报告真实的查验结果
-- 发言要有逻辑推理和心路历程
+- 公开发言只能使用自己合理可公开的信息，不能泄露 privateFacts
+- 发言要引用上一轮可见事实，给出明确怀疑对象或信任对象
 - 发言要像真人，不要像机器人`
 }
 

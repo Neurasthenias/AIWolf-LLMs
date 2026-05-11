@@ -236,10 +236,12 @@ function ThoughtChain({ traces, expanded, setExpanded }: {
       <div className="text-xs text-gray-500 mb-2">
         {traces.filter(t => !t.fallbackUsed).length}/{traces.length} 次 LLM 调用成功
         {" · "}总计 {traces.reduce((s, t) => s + t.usage.totalTokens, 0)} tokens
+        {" · "}thinking {traces.filter(t => t.thinkingEnabled).length}/{traces.length}
       </div>
       {traces.map((t, i) => {
         const isOpen = expanded === i
-        const intent = t.parsedIntent
+        const intent = t.finalIntent ?? t.parsedIntent
+        const analysis = intent?.analysis
         return (
           <div key={i} className={`border rounded-lg transition-colors ${isOpen ? "border-amber-700 bg-gray-900" : "border-gray-800 hover:border-gray-700"}`}>
             {/* Header — always visible */}
@@ -251,6 +253,7 @@ function ThoughtChain({ traces, expanded, setExpanded }: {
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm font-bold">{t.playerId}</span>
                   <span className="text-xs bg-gray-700 px-1.5 py-0.5 rounded">{TASK_NAME[t.task] ?? t.task}</span>
+                  {t.thinkingEnabled && <span className="text-[10px] bg-indigo-900 px-1 rounded text-indigo-300">thinking {t.reasoningEffort ?? "high"}</span>}
                   {t.fallbackUsed && <span className="text-[10px] bg-red-900 px-1 rounded text-red-300">fallback</span>}
                 </div>
                 <div className="text-xs text-gray-500 mt-0.5">
@@ -270,6 +273,18 @@ function ThoughtChain({ traces, expanded, setExpanded }: {
               <div className="px-3 pb-3 border-t border-gray-800 space-y-3 text-xs">
                 {/* Action & Speech */}
                 <div className="grid grid-cols-2 gap-3 mt-2">
+                  {analysis && (
+                    <div className="bg-gray-800 p-2 rounded col-span-2">
+                      <div className="text-gray-400 mb-1">🧭 决策摘要</div>
+                      {analysis.strategy && <div className="text-gray-300">策略: {analysis.strategy}</div>}
+                      {analysis.risk && <div className="text-gray-500 mt-1">风险: {analysis.risk}</div>}
+                      {analysis.suspicions?.length > 0 && (
+                        <div className="mt-1 text-gray-400">
+                          怀疑: {analysis.suspicions.slice(0, 3).map(s => `${s.playerId} ${(s.score * 100).toFixed(0)}% ${s.reason}`).join("；")}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {intent?.action && (
                     <div className="bg-gray-800 p-2 rounded">
                       <div className="text-gray-400 mb-1">🎯 行动决策</div>
@@ -301,7 +316,11 @@ function ThoughtChain({ traces, expanded, setExpanded }: {
                   <span>C: {t.usage.completionTokens}</span>
                   <span>T: {t.usage.totalTokens}</span>
                   <span>{t.latencyMs}ms</span>
+                  {t.model && <span>{t.model}</span>}
+                  {typeof t.reasoningContentLength === "number" && <span>R: {t.reasoningContentLength}</span>}
+                  {t.finishReason && <span>finish: {t.finishReason}</span>}
                   {t.parseError && <span className="text-red-400">⚠ {t.parseError.slice(0, 80)}</span>}
+                  {t.fallbackReason && <span className="text-red-400">fallback: {t.fallbackReason.slice(0, 80)}</span>}
                 </div>
 
                 {/* Raw & Prompt — collapsible */}

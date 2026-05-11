@@ -1,9 +1,9 @@
 import type { GameState, GameEvent, Command, Effect } from "@aiwolf/shared/types"
-import { createGame, reduce, handleCommand, determineNextPhase, FileEventStore } from "@aiwolf/engine"
+import { createGame, reduce, handleCommand, determineNextPhase, isPhaseComplete, FileEventStore } from "@aiwolf/engine"
 import { v7 as uuidv7 } from "uuid"
 
 const INTERACTIVE_PHASES = new Set([
-  "WOLF_PROPOSE", "SEER_CHOOSE", "WITCH_DECIDE",
+  "ROLE_REVEAL", "WOLF_PROPOSE", "SEER_CHOOSE", "WITCH_DECIDE",
   "SPEECH_TURN_ACTIVE", "VOTE_CAST", "COMMON_LAST_WORDS", "HUNTER_SHOOT",
 ])
 
@@ -22,6 +22,8 @@ export class GameRuntime {
   private eventSubscribers: Array<(event: GameEvent) => void> = []
   private aiPipeline?: import("@aiwolf/ai").AIPipeline
   private aiEventsFeed: GameEvent[] = []
+  private aiChainRunning = false
+  private aiChainPendingPhase: string | null = null
   autoPlay = false
   gameId: string
 
@@ -114,19 +116,22 @@ export class GameRuntime {
     this.saveState(currentState)
     await this.runEffects()
 
-    // If game is over, stop processing
     if (currentState.gameOver) return
-
-    // Only auto-advance/AI-play when autoPlay is enabled
     if (!this.autoPlay) return
 
-    // Auto-advance through non-interactive phases
-    if (AUTO_ADVANCE_PHASES.has(currentState.phase.subPhase)) {
-      const next = determineNextPhase(currentState)
-      if (next === currentState.phase.subPhase || next === "MVP_ANNOUNCE") return
+    // Delegate to unified auto-flow logic
+    await this.continueAutoFlow(currentState)
+  }
 
-      // CHECK_WIN → RESULT_ANNOUNCE means game ended
-      if (currentState.phase.subPhase === "CHECK_WIN" && next === "RESULT_ANNOUNCE") {
+  /** Unified auto-advance: handle non-interactive → advance, interactive → chain */
+  private async continueAutoFlow(currentState: GameState): Promise<void> {
+    const subPhase = currentState.phase.subPhase
+
+    if (AUTO_ADVANCE_PHASES.has(subPhase)) {
+      const next = determineNextPhase(currentState)
+      if (next === subPhase || next === "MVP_ANNOUNCE") return
+
+      if (subPhase === "CHECK_WIN" && next === "RESULT_ANNOUNCE") {
         await this.dispatchInlineCmd({
           id: uuidv7(), version: "1.0", type: "game:end",
           gameId: this.gameId, actorId: "system", timestamp: Date.now(),
@@ -136,20 +141,39 @@ export class GameRuntime {
       }
 
       if (INTERACTIVE_PHASES.has(next)) {
-        // Handle interactive chain synchronously
-        await this.handleInteractiveChain(currentState, next)
+        this.scheduleInteractiveChain(next)
       } else {
-        // Queue non-interactive advance
         this.commandQueue.unshift({
           id: uuidv7(), version: "1.0", type: "phase:advance",
           gameId: this.gameId, actorId: "system", timestamp: Date.now(),
           payload: { to: next, round: currentState.phase.round },
         })
       }
-    } else if (INTERACTIVE_PHASES.has(currentState.phase.subPhase)) {
-      // We're already in an interactive phase (e.g., from a direct command)
-      await this.handleInteractiveChain(currentState, currentState.phase.subPhase)
+    } else if (INTERACTIVE_PHASES.has(subPhase)) {
+      this.scheduleInteractiveChain(subPhase)
     }
+  }
+
+  private scheduleInteractiveChain(firstPhase: string): void {
+    if (this.aiChainRunning) {
+      this.aiChainPendingPhase = firstPhase
+      return
+    }
+    this.aiChainRunning = true
+    setImmediate(() => {
+      this.handleInteractiveChain(this.getState(), firstPhase)
+        .catch(err => {
+          console.error("[runtime] AI chain error:", err)
+        })
+        .finally(() => {
+          this.aiChainRunning = false
+          const pending = this.aiChainPendingPhase
+          this.aiChainPendingPhase = null
+          if (pending) {
+            this.continueAutoFlow(this.getState())
+          }
+        })
+    })
   }
 
   // ── AI Interactive Phase Chain ──
@@ -160,29 +184,44 @@ export class GameRuntime {
     let nextPhase: string | null = firstPhase
 
     while (nextPhase && INTERACTIVE_PHASES.has(nextPhase) && !currentState.gameOver) {
-      // Advance to this interactive phase
-      const phaseCmd: Command = {
-        id: uuidv7(), version: "1.0", type: "phase:advance",
-        gameId: this.gameId, actorId: "system", timestamp: Date.now(),
-        payload: { to: nextPhase, round: currentState.phase.round },
+      // Only advance if not already in this phase (avoids duplicate phase:transitioned)
+      if (currentState.phase.subPhase !== nextPhase) {
+        const phaseCmd: Command = {
+          id: uuidv7(), version: "1.0", type: "phase:advance",
+          gameId: this.gameId, actorId: "system", timestamp: Date.now(),
+          payload: { to: nextPhase, round: currentState.phase.round },
+        }
+        currentState = await this.dispatchInlineCmd(phaseCmd)
       }
-      currentState = await this.dispatchInlineCmd(phaseCmd)
 
       // Generate AI actions for this phase
       await this.ensureAIPipeline()
 
+      const stateBefore = currentState.lastEventSeq
       if (this.aiPipeline) {
         currentState = await this.runAIPhase(currentState, nextPhase)
       } else {
         currentState = await this.runRuleBasedPhase(currentState, nextPhase)
       }
+      const madeProgress = currentState.lastEventSeq > stateBefore
 
       if (currentState.gameOver) break
 
+      // Don't advance if phase is not yet complete
+      if (!isPhaseComplete(currentState)) {
+        // Stay in the same phase to process more AI actions (e.g. next speaker)
+        // Only continue if we made progress (avoids infinite loop on human speaker)
+        if (INTERACTIVE_PHASES.has(currentState.phase.subPhase) && madeProgress) {
+          nextPhase = currentState.phase.subPhase
+          continue
+        }
+        break
+      }
+
       nextPhase = determineNextPhase(currentState)
-      // If next is non-interactive, queue it and stop
+      // If next is non-interactive, dispatch it and stop
       if (nextPhase && !INTERACTIVE_PHASES.has(nextPhase) && nextPhase !== "MVP_ANNOUNCE" && nextPhase !== currentState.phase.subPhase) {
-        this.commandQueue.unshift({
+        await this.dispatch({
           id: uuidv7(), version: "1.0", type: "phase:advance",
           gameId: this.gameId, actorId: "system", timestamp: Date.now(),
           payload: { to: nextPhase, round: currentState.phase.round },
@@ -200,22 +239,49 @@ export class GameRuntime {
     let s = state
 
     switch (phase) {
+      case "ROLE_REVEAL": {
+        for (const p of aiPlayers) {
+          if ((s.roleAcks ?? []).includes(p.id)) continue
+          s = await this.dispatchInlineCmd({
+            id: uuidv7(), version: "1.0", type: "role:acknowledge",
+            gameId: this.gameId, actorId: p.id, timestamp: Date.now(),
+            payload: {},
+          })
+        }
+        return s
+      }
+
       case "WOLF_PROPOSE": {
-        const wolves = aiPlayers.filter(p => p.role === "werewolf")
-        const proposals: { wolfId: string; targetId: string }[] = []
-        for (const wolf of wolves) {
+        // All alive wolves (AI + human) must propose before resolution
+        const allWolves = Object.values(s.players).filter(p => p.isAlive && p.role === "werewolf")
+        const aiWolves = allWolves.filter(p => p.isAI)
+
+        // Generate proposals for AI wolves that haven't proposed yet
+        for (const wolf of aiWolves) {
+          const alreadyProposed = (s.wolfProposals ?? []).some(p => p.wolfId === wolf.id)
+          if (alreadyProposed) continue
           try {
             const { command } = await pipeline.generateAction(s, wolf.id, "wolf_kill", this.aiEventsFeed)
-            const targetId = (command.payload as { targetId: string }).targetId
-            if (targetId) proposals.push({ wolfId: wolf.id, targetId })
             s = await this.dispatchInlineCmd(command)
           } catch {
             const goods = Object.values(s.players).filter(p => p.isAlive && p.faction === "good")
             const t = goods.length > 0 ? goods[Math.floor(Math.random() * goods.length)]! : null
-            if (t) proposals.push({ wolfId: wolf.id, targetId: t.id })
+            if (t) {
+              s = await this.dispatchInlineCmd({
+                id: uuidv7(), version: "1.0", type: "night:wolf_kill",
+                gameId: this.gameId, actorId: wolf.id, timestamp: Date.now(),
+                payload: { targetId: t.id },
+              })
+            }
           }
         }
-        // Save consensus to state (killed later in WITCH_DECIDE via night:witch_resolve)
+
+        // Check if ALL alive wolves have proposed
+        const proposals = s.wolfProposals ?? []
+        const allProposed = allWolves.every(w => proposals.some(p => p.wolfId === w.id))
+        if (!allProposed) return s // Wait for human wolves
+
+        // Tally and resolve
         if (proposals.length > 0) {
           const tally: Record<string, number> = {}
           for (const p of proposals) { tally[p.targetId] = (tally[p.targetId] ?? 0) + 1 }
@@ -286,26 +352,62 @@ export class GameRuntime {
       }
 
       case "SPEECH_TURN_ACTIVE": {
-        // Process all AI speakers in seat order (skip human)
-        const speakers = aiPlayers.sort((a, b) => a.seat - b.seat)
-        for (const sp of speakers) {
+        // Initialize speech queue once per phase
+        if (!s.speechQueue || s.speechQueue.length === 0) {
+          const queue = Object.values(s.players)
+            .filter(p => p.isAlive)
+            .sort((a, b) => a.seat - b.seat)
+            .map(p => p.id)
+          s = await this.dispatchInlineCmd({
+            id: uuidv7(), version: "1.0", type: "speech:init_speech_queue",
+            gameId: this.gameId, actorId: "system", timestamp: Date.now(),
+            payload: { queue },
+          })
+        }
+
+        // Find next speaker who hasn't spoken yet
+        const queue = s.speechQueue ?? []
+        const done = new Set(s.speechDone ?? [])
+        const nextSpeakerId = queue.find(id => !done.has(id))
+        if (!nextSpeakerId) return s // All done
+
+        const speaker = s.players[nextSpeakerId]
+        if (!speaker || !speaker.isAlive) {
+          s = await this.dispatchInlineCmd({
+            id: uuidv7(), version: "1.0", type: "speech:mark_speech_done",
+            gameId: this.gameId, actorId: "system", timestamp: Date.now(),
+            payload: { playerId: nextSpeakerId },
+          })
+          return s // Re-enter for next speaker
+        }
+
+        // Set as current speaker
+        s = await this.dispatchInlineCmd({
+          id: uuidv7(), version: "1.0", type: "speech:set_speaker",
+          gameId: this.gameId, actorId: "system", timestamp: Date.now(),
+          payload: { playerId: nextSpeakerId },
+        })
+
+        // AI speaker: generate + mark done immediately
+        if (speaker.isAI) {
           try {
-            const { command } = await pipeline.generateAction(s, sp.id, "speech", this.aiEventsFeed)
+            const { command } = await pipeline.generateAction(s, nextSpeakerId, "speech", this.aiEventsFeed)
             s = await this.dispatchInlineCmd(command)
           } catch {
             s = await this.dispatchInlineCmd({
               id: uuidv7(), version: "1.0", type: "speech:submit",
-              gameId: this.gameId, actorId: sp.id, timestamp: Date.now(),
-              payload: { content: fallbackSpeech(sp.role, sp.faction) },
+              gameId: this.gameId, actorId: nextSpeakerId, timestamp: Date.now(),
+              payload: { content: fallbackSpeech(speaker.role, speaker.faction) },
             })
           }
-          // Set this speaker as current so the UI updates
           s = await this.dispatchInlineCmd({
-            id: uuidv7(), version: "1.0", type: "speech:set_speaker",
+            id: uuidv7(), version: "1.0", type: "speech:mark_speech_done",
             gameId: this.gameId, actorId: "system", timestamp: Date.now(),
-            payload: { playerId: sp.id },
+            payload: { playerId: nextSpeakerId },
           })
         }
+        // Human speaker: wait — speech:submit will trigger chain re-entry
+
         return s
       }
 
@@ -359,14 +461,52 @@ export class GameRuntime {
     let s = state
 
     switch (phase) {
+      case "ROLE_REVEAL": {
+        for (const p of aiPlayers) {
+          if ((s.roleAcks ?? []).includes(p.id)) continue
+          s = await this.dispatchInlineCmd({
+            id: uuidv7(), version: "1.0", type: "role:acknowledge",
+            gameId: this.gameId, actorId: p.id, timestamp: Date.now(),
+            payload: {},
+          })
+        }
+        return s
+      }
+
       case "WOLF_PROPOSE": {
+        const allWolves = Object.values(s.players).filter(p => p.isAlive && p.role === "werewolf")
+        const aiWolves = allWolves.filter(p => p.isAI)
         const goods = Object.values(s.players).filter(p => p.isAlive && p.faction === "good")
-        if (goods.length > 0) {
-          const t = goods[Math.floor(Math.random() * goods.length)]!
+
+        // Generate proposals for AI wolves that haven't proposed yet
+        for (const wolf of aiWolves) {
+          const alreadyProposed = (s.wolfProposals ?? []).some(p => p.wolfId === wolf.id)
+          if (alreadyProposed) continue
+          if (goods.length > 0) {
+            const t = goods[Math.floor(Math.random() * goods.length)]!
+            s = await this.dispatchInlineCmd({
+              id: uuidv7(), version: "1.0", type: "night:wolf_kill",
+              gameId: this.gameId, actorId: wolf.id, timestamp: Date.now(),
+              payload: { targetId: t.id },
+            })
+          }
+        }
+
+        // Check if ALL alive wolves have proposed
+        const proposals = s.wolfProposals ?? []
+        const allProposed = allWolves.every(w => proposals.some(p => p.wolfId === w.id))
+        if (!allProposed) return s // Wait for human wolves
+
+        if (proposals.length > 0) {
+          const tally: Record<string, number> = {}
+          for (const p of proposals) { tally[p.targetId] = (tally[p.targetId] ?? 0) + 1 }
+          const maxCount = Math.max(...Object.values(tally))
+          const topIds = Object.entries(tally).filter(([, c]) => c === maxCount).map(([id]) => id)
+          const targetId = topIds.sort()[0]!
           s = await this.dispatchInlineCmd({
             id: uuidv7(), version: "1.0", type: "night:wolf_proposal_resolved",
             gameId: this.gameId, actorId: "system", timestamp: Date.now(),
-            payload: { targetId: t.id },
+            payload: { targetId },
           })
         }
         return s
@@ -398,14 +538,53 @@ export class GameRuntime {
         return s
       }
       case "SPEECH_TURN_ACTIVE": {
-        const speakers = aiPlayers.sort((a, b) => a.seat - b.seat)
-        for (const speaker of speakers) {
+        // Initialize speech queue once per phase
+        if (!s.speechQueue || s.speechQueue.length === 0) {
+          const queue = Object.values(s.players)
+            .filter(p => p.isAlive)
+            .sort((a, b) => a.seat - b.seat)
+            .map(p => p.id)
           s = await this.dispatchInlineCmd({
-            id: uuidv7(), version: "1.0", type: "speech:submit",
-            gameId: this.gameId, actorId: speaker.id, timestamp: Date.now(),
-            payload: { content: fallbackSpeech(speaker.role, speaker.faction) },
+            id: uuidv7(), version: "1.0", type: "speech:init_speech_queue",
+            gameId: this.gameId, actorId: "system", timestamp: Date.now(),
+            payload: { queue },
           })
         }
+
+        const queue = s.speechQueue ?? []
+        const done = new Set(s.speechDone ?? [])
+        const nextSpeakerId = queue.find(id => !done.has(id))
+        if (!nextSpeakerId) return s
+
+        const speaker = s.players[nextSpeakerId]
+        if (!speaker || !speaker.isAlive) {
+          s = await this.dispatchInlineCmd({
+            id: uuidv7(), version: "1.0", type: "speech:mark_speech_done",
+            gameId: this.gameId, actorId: "system", timestamp: Date.now(),
+            payload: { playerId: nextSpeakerId },
+          })
+          return s
+        }
+
+        s = await this.dispatchInlineCmd({
+          id: uuidv7(), version: "1.0", type: "speech:set_speaker",
+          gameId: this.gameId, actorId: "system", timestamp: Date.now(),
+          payload: { playerId: nextSpeakerId },
+        })
+
+        if (speaker.isAI) {
+          s = await this.dispatchInlineCmd({
+            id: uuidv7(), version: "1.0", type: "speech:submit",
+            gameId: this.gameId, actorId: nextSpeakerId, timestamp: Date.now(),
+            payload: { content: fallbackSpeech(speaker.role, speaker.faction) },
+          })
+          s = await this.dispatchInlineCmd({
+            id: uuidv7(), version: "1.0", type: "speech:mark_speech_done",
+            gameId: this.gameId, actorId: "system", timestamp: Date.now(),
+            payload: { playerId: nextSpeakerId },
+          })
+        }
+
         return s
       }
       case "VOTE_CAST": {
@@ -452,10 +631,21 @@ export class GameRuntime {
     if (!this.aiConfig) {
       const apiKey = process.env.OPENAI_API_KEY
       if (apiKey) {
+        const baseURL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1"
+        const model = process.env.OPENAI_MODEL || "gpt-4o-mini"
+        const isDeepSeek = process.env.OPENAI_PROVIDER === "deepseek" || baseURL.includes("deepseek") || model.startsWith("deepseek")
+        const thinkingEnabled = process.env.AI_THINKING_ENABLED
+          ? process.env.AI_THINKING_ENABLED === "true"
+          : model === "deepseek-v4-flash"
         this.aiConfig = {
           apiKey,
-          baseURL: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
-          model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+          baseURL,
+          model,
+          provider: isDeepSeek ? "deepseek" : "openai-compatible",
+          thinking: {
+            enabled: thinkingEnabled,
+            effort: process.env.AI_REASONING_EFFORT === "max" ? "max" : "high",
+          },
         }
       }
     }
@@ -521,6 +711,13 @@ export class GameRuntime {
         console.error(`[runtime] Effect ${effect.id} failed:`, (err as Error).message)
       }
     }))
+  }
+
+  // ── Event Store Access ──
+
+  async getEventsSince(fromSeq: number): Promise<GameEvent[]> {
+    const all = await this.eventStore.load(this.gameId)
+    return all.filter(e => e.seq > fromSeq)
   }
 
   // ── Metrics ──

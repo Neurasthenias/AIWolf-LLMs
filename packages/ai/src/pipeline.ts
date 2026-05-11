@@ -11,11 +11,19 @@ export interface AITrace {
   playerId: string
   task: string
   timestamp: number
+  model: string
+  provider: string
+  thinkingEnabled: boolean
+  reasoningEffort?: "high" | "max"
+  reasoningContentLength: number
+  finishReason?: string
   context: Record<string, unknown>
   rawResponse: string
   reasoning: string
   parsedIntent: AIIntent | null
+  finalIntent: AIIntent | null
   parseError?: string
+  fallbackReason?: string
   usage: { promptTokens: number; completionTokens: number; totalTokens: number }
   latencyMs: number
   fallbackUsed: boolean
@@ -83,11 +91,18 @@ export class AIPipeline {
       playerId,
       task,
       timestamp: Date.now(),
+      model: result.meta.model,
+      provider: result.meta.provider,
+      thinkingEnabled: result.meta.thinkingEnabled,
+      ...(result.meta.reasoningEffort ? { reasoningEffort: result.meta.reasoningEffort } : {}),
+      reasoningContentLength: result.meta.reasoningContentLength,
+      ...(result.meta.finishReason ? { finishReason: result.meta.finishReason } : {}),
       context: { systemPrompt: context.systemPrompt, userPrompt: context.userPrompt },
       rawResponse: result.raw,
       reasoning: result.reasoning,
       parsedIntent: result.intent,
-      parseError: result.parseError,
+      finalIntent: result.intent,
+      ...(result.parseError ? { parseError: result.parseError } : {}),
       usage: result.usage,
       latencyMs: result.latencyMs,
       fallbackUsed: false,
@@ -96,8 +111,10 @@ export class AIPipeline {
     // Fallback to rule-based if parse failed
     if (!result.intent) {
       trace.fallbackUsed = true
+      trace.fallbackReason = result.parseError ?? "empty_intent"
       const fallbackIntent = ruleBasedFallback(state, playerId, task)
       result.intent = fallbackIntent  // mutate for command generation
+      trace.finalIntent = fallbackIntent
     }
 
     // Convert Intent to Command

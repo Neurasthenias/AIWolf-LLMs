@@ -1,7 +1,7 @@
 import type { GameState, GameEvent, Effect, PhaseType, SubPhaseType } from "@aiwolf/shared/types"
 
 const PHASE_MAP: Record<SubPhaseType, PhaseType> = {
-  WAITING_PLAYERS: "WAITING", ROLE_ASSIGNMENT: "WAITING",
+  WAITING_PLAYERS: "WAITING", ROLE_ASSIGNMENT: "WAITING", ROLE_REVEAL: "WAITING",
   NIGHT_ANNOUNCE: "NIGHT", WOLF_INTEL: "NIGHT", WOLF_PROPOSE: "NIGHT", WOLF_RESOLVE: "NIGHT",
   SEER_CHOOSE: "NIGHT", SEER_RESULT: "NIGHT", WITCH_NOTIFY: "NIGHT", WITCH_DECIDE: "NIGHT",
   GUARD_CHOOSE: "NIGHT", NIGHT_SETTLEMENT: "NIGHT",
@@ -33,12 +33,20 @@ export function reducePhase(state: GameState, event: GameEvent): { newState: Gam
         payload: { phase: to },
       })
 
+      const timeoutSec = state.config?.timeouts?.[timeoutKey(to)] ?? 0
+      const phaseTimerDeadline = timeoutSec > 0 ? event.timestamp + timeoutSec * 1000 : undefined
+
       return {
         newState: {
           ...state,
           phase: { type: phaseType, subPhase: to, round, dayNumber: newDayNumber },
+          ...(phaseTimerDeadline ? { phaseTimerDeadline } : { phaseTimerDeadline: undefined }),
           // Reset vote state on phase transition
           ...(to === "VOTE_CAST" ? {} : { players: resetVotes(state.players) }),
+          // Reset wolf proposals at start of each night
+          ...(to === "WOLF_INTEL" ? { wolfProposals: [], resolvedWolfTarget: undefined } : {}),
+          // Reset speech state at start of each speech phase
+          ...(to === "SPEECH_PRE_THINK" ? { speechQueue: [], speechDone: [] } : {}),
         },
         effects,
       }
@@ -64,6 +72,7 @@ export function reducePhase(state: GameState, event: GameEvent): { newState: Gam
         newState: {
           ...state,
           speeches: [...state.speeches, { playerId, content: fullText, timestamp: event.timestamp, round: state.phase.round }],
+          speechDone: [...(state.speechDone ?? []), playerId],
         },
         effects,
       }
@@ -76,11 +85,11 @@ export function reducePhase(state: GameState, event: GameEvent): { newState: Gam
       }
     }
     case "wolf:proposal_submitted": {
-      const { playerId, targetId } = event.payload as { playerId: string; targetId: string }
+      const { playerId, targetId, reason } = event.payload as { playerId: string; targetId: string; reason?: string }
       return {
         newState: {
           ...state,
-          wolfProposals: [...(state.wolfProposals ?? []), { wolfId: playerId, targetId }],
+          wolfProposals: [...(state.wolfProposals ?? []), { wolfId: playerId, targetId, reason }],
         },
         effects,
       }
@@ -105,6 +114,33 @@ export function reducePhase(state: GameState, event: GameEvent): { newState: Gam
         effects,
       }
     }
+    case "role:acknowledged": {
+      const { playerId } = event.payload as { playerId: string }
+      return {
+        newState: {
+          ...state,
+          roleAcks: [...(state.roleAcks ?? []), playerId],
+        },
+        effects: [],
+      }
+    }
+    case "speech:queue_initialized": {
+      const { queue } = event.payload as { queue: string[] }
+      return {
+        newState: { ...state, speechQueue: queue, speechDone: [] },
+        effects: [],
+      }
+    }
+    case "speech:player_done": {
+      const { playerId } = event.payload as { playerId: string }
+      return {
+        newState: {
+          ...state,
+          speechDone: [...(state.speechDone ?? []), playerId],
+        },
+        effects: [],
+      }
+    }
     case "game:ended": {
       return {
         newState: {
@@ -117,6 +153,13 @@ export function reducePhase(state: GameState, event: GameEvent): { newState: Gam
     default:
       return { newState: state, effects }
   }
+}
+
+function timeoutKey(subPhase: SubPhaseType): string {
+  if (subPhase === "VOTE_CAST") return "vote"
+  if (subPhase === "SPEECH_TURN_ACTIVE") return "speech"
+  if (PHASE_MAP[subPhase] === "NIGHT") return "night"
+  return subPhase.toLowerCase()
 }
 
 function resetVotes(players: GameState["players"]): GameState["players"] {

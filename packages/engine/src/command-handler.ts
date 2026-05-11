@@ -59,6 +59,14 @@ export function handleCommand(command: Command, state: GameState): GameEvent[] {
       return roleEvents
     }
 
+    // ── Role Acknowledge ──
+    case "role:acknowledge":
+      return [{
+        ...base, id: uuidv7(), seq: state.lastEventSeq + 1,
+        type: "role:acknowledged", visibility: "hidden" as const,
+        payload: { playerId: command.actorId },
+      }]
+
     // ── Phase Transition ──
     case "phase:advance": {
       const { to, round } = command.payload as { to: string; round: number }
@@ -75,7 +83,7 @@ export function handleCommand(command: Command, state: GameState): GameEvent[] {
         ...base, id: uuidv7(), seq: state.lastEventSeq + 1,
         type: "wolf:proposal_submitted", visibility: "private",
         visibleTo: getWolfIds(state),
-        payload: { playerId: command.actorId, targetId: (command.payload as { targetId: string }).targetId, reason: "" },
+        payload: { playerId: command.actorId, targetId: (command.payload as { targetId: string }).targetId, reason: (command.payload as { reason?: string }).reason ?? "" },
       }]
     case "night:wolf_kill_resolved": {
       const { targetId } = command.payload as { targetId: string }
@@ -117,6 +125,22 @@ export function handleCommand(command: Command, state: GameState): GameEvent[] {
     }
 
     // ── Speech ──
+    case "speech:init_speech_queue": {
+      const { queue } = command.payload as { queue: string[] }
+      return [{
+        ...base, id: uuidv7(), seq: state.lastEventSeq + 1,
+        type: "speech:queue_initialized", visibility: "public" as const,
+        payload: { queue },
+      }]
+    }
+    case "speech:mark_speech_done": {
+      const { playerId } = command.payload as { playerId: string }
+      return [{
+        ...base, id: uuidv7(), seq: state.lastEventSeq + 1,
+        type: "speech:player_done", visibility: "public" as const,
+        payload: { playerId },
+      }]
+    }
     case "speech:submit":
       return [{
         ...base, id: uuidv7(), seq: state.lastEventSeq + 1,

@@ -6,6 +6,9 @@
   "exports": {
     ".": "./src/index.ts"
   },
+  "scripts": {
+    "test": "vitest run"
+  },
   "dependencies": {
     "@aiwolf/shared": "workspace:*",
     "@aiwolf/protocol": "workspace:*"

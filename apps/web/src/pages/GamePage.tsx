@@ -1,8 +1,11 @@
 import { useState } from "react"
 import { useGameStore } from "../store/game"
+import { RoleRevealModal } from "../components/RoleRevealModal"
+import { WolfTeamPanel } from "../components/WolfTeamPanel"
+import type { PlayerView } from "../types"
 
 export function GamePage() {
-  const { view, sendSpeech, sendVote, sendAction, events, requestCatchup, playerId } = useGameStore()
+  const { view, sendSpeech, sendVote, sendAction, events, requestCatchup, playerId, error, actionPending, clearError } = useGameStore()
   const [speechText, setSpeechText] = useState("")
   const [showReplay, setShowReplay] = useState(false)
 
@@ -17,7 +20,7 @@ export function GamePage() {
     )
   }
 
-  const { self, players, phase, speeches, voteResult, deathAnnouncement, gameOver } = view
+  const { self, players, phase, guidance, speeches, voteResult, deathAnnouncement, gameOver } = view
   const isNight = phase.type === "NIGHT"
   const isSpeaking = phase.subPhase === "SPEECH_TURN_ACTIVE"
   const isVoting = phase.subPhase === "VOTE_CAST"
@@ -29,6 +32,7 @@ export function GamePage() {
 
   return (
     <div className={`min-h-screen ${isNight ? "bg-gray-950" : "bg-gray-900"} text-white`}>
+      <RoleRevealModal />
       {/* Header */}
       <div className="p-4 border-b border-gray-800 flex justify-between items-center">
         <div>
@@ -51,6 +55,13 @@ export function GamePage() {
       <div className="flex h-[calc(100vh-60px)]">
         {/* Main area */}
         <div className="flex-1 p-4 overflow-y-auto space-y-4">
+          <PhaseGuide
+            guidance={guidance}
+            phaseLabel={phaseLabel(phase.type, phase.subPhase)}
+            players={players}
+            {...(phase.currentSpeakerId ? { currentSpeakerId: phase.currentSpeakerId } : {})}
+          />
+
           {/* Death announcement */}
           {deathAnnouncement && (
             <div className="p-3 bg-red-900/50 rounded border border-red-700">
@@ -58,6 +69,11 @@ export function GamePage() {
                 ? "☀️ 昨晚是平安夜"
                 : `💀 昨晚死亡：${deathAnnouncement.deaths.map(d => `${players.find(p => p.id === d.playerId)?.name ?? d.playerId}`).join("、")}`}
             </div>
+          )}
+
+          {/* Wolf team panel (private to werewolves during night) */}
+          {isWolfPhase && self.role === "werewolf" && (
+            <WolfTeamPanel />
           )}
 
           {/* Game over */}
@@ -109,9 +125,10 @@ export function GamePage() {
             {players.map(p => (
               <div key={p.id} className={`flex items-center gap-2 py-1 text-sm ${!p.isAlive ? "text-red-400 line-through" : ""}`}>
                 <span className="w-4">{p.isAlive ? "●" : "✕"}</span>
-                <span>{p.name}</span>
+                <span className={phase.currentSpeakerId === p.id ? "text-amber-300 font-bold" : ""}>{p.name}</span>
                 {p.id === playerId && <span className="text-amber-400 text-xs">(你)</span>}
                 {p.isAI && <span className="text-xs text-gray-500">AI</span>}
+                {phase.currentSpeakerId === p.id && <span className="text-xs text-amber-500">发言中</span>}
               </div>
             ))}
           </div>
@@ -139,6 +156,14 @@ export function GamePage() {
 
       {/* Bottom action bar */}
       <div className="fixed bottom-0 left-0 right-0 p-4 bg-gray-900 border-t border-gray-800">
+        {/* Error banner */}
+        {error && (
+          <div className="mb-2 p-2 bg-red-900/60 border border-red-600 rounded flex items-center justify-between">
+            <span className="text-red-300 text-sm">{errorLabel(error)}</span>
+            <button onClick={clearError} className="text-red-400 hover:text-red-200 text-sm ml-2">✕</button>
+          </div>
+        )}
+
         {/* Game over */}
         {isGameOver && (
           <div className="text-center text-amber-400 text-lg font-bold">
@@ -158,10 +183,10 @@ export function GamePage() {
             />
             <button
               onClick={() => { sendSpeech(speechText); setSpeechText("") }}
-              disabled={speechText.length < 10}
+              disabled={speechText.length < 10 || actionPending === "speech:submit"}
               className="px-6 py-3 bg-amber-600 rounded font-bold disabled:opacity-50"
             >
-              发言
+              {actionPending === "speech:submit" ? "发送中..." : "发言"}
             </button>
           </div>
         )}
@@ -169,35 +194,49 @@ export function GamePage() {
         {/* Vote panel */}
         {!isGameOver && isVoting && self.isAlive && (
           <div className="flex gap-2 flex-wrap">
-            {players.filter(p => p.isAlive && p.id !== self.id).map(p => (
-              <button key={p.id} onClick={() => sendVote(p.id)} className="px-3 py-2 bg-gray-700 rounded hover:bg-red-700 text-sm">
-                🗳️ {p.name}
-              </button>
-            ))}
-            <button onClick={() => sendVote(null)} className="px-3 py-2 bg-gray-700 rounded hover:bg-gray-600 text-sm">
-              弃票
-            </button>
+            {actionPending === "vote:cast" ? (
+              <p className="text-sm text-amber-400">已提交投票，等待结果...</p>
+            ) : (
+              <>
+                {players.filter(p => p.isAlive && p.id !== self.id).map(p => (
+                  <button key={p.id} onClick={() => sendVote(p.id)} className="px-3 py-2 bg-gray-700 rounded hover:bg-red-700 text-sm">
+                    🗳️ {p.name}
+                  </button>
+                ))}
+                <button onClick={() => sendVote(null)} className="px-3 py-2 bg-gray-700 rounded hover:bg-gray-600 text-sm">
+                  弃票
+                </button>
+              </>
+            )}
           </div>
         )}
 
         {/* Night action panel */}
         {!isGameOver && canAct && (
           <div className="flex gap-2 flex-wrap">
-            <p className="w-full text-xs text-amber-400 mb-1">
-              {isWolfPhase ? "选择击杀目标" : isSeerPhase ? "选择查验目标" : "选择行动"}
-            </p>
-            {players.filter(p => p.isAlive && p.id !== self.id).map(p => (
-              <button key={p.id} onClick={() => sendAction(
-                isWolfPhase ? "night:wolf_kill" : isSeerPhase ? "night:seer_check" : "night:witch_action",
-                p.id
-              )} className="px-3 py-2 bg-red-900 rounded hover:bg-red-700 text-sm">
-                {p.name}
-              </button>
-            ))}
-            {isWitchPhase && (
-              <button onClick={() => sendAction("night:witch_action")} className="px-3 py-2 bg-gray-700 rounded text-sm">
-                不行动
-              </button>
+            {actionPending ? (
+              <p className="text-sm text-amber-400">已提交行动，等待阶段推进...</p>
+            ) : (
+              <>
+                <p className="w-full text-xs text-amber-400 mb-1">
+                  {isWolfPhase ? "选择击杀目标" : isSeerPhase ? "选择查验目标" : "选择行动"}
+                </p>
+                {players
+                  .filter(p => p.isAlive && p.id !== self.id && !(isWolfPhase && self.teammates?.includes(p.id)))
+                  .map(p => (
+                  <button key={p.id} onClick={() => sendAction(
+                    isWolfPhase ? "night:wolf_kill" : isSeerPhase ? "night:seer_check" : "night:witch_action",
+                    p.id
+                  )} className="px-3 py-2 bg-red-900 rounded hover:bg-red-700 text-sm">
+                    {p.name}
+                  </button>
+                ))}
+                {isWitchPhase && (
+                  <button onClick={() => sendAction("night:witch_action")} className="px-3 py-2 bg-gray-700 rounded text-sm">
+                    不行动
+                  </button>
+                )}
+              </>
             )}
           </div>
         )}
@@ -205,7 +244,7 @@ export function GamePage() {
         {/* Waiting state */}
         {!isGameOver && !isSpeaking && !isVoting && !canAct && (
           <p className="text-center text-gray-500 text-sm">
-            {isNight ? "🌙 夜晚阶段 — 等待中..." : "等待其他玩家..."}
+            {guidance?.description ?? (isNight ? "🌙 夜晚阶段 — 等待中..." : "等待其他玩家...")}
           </p>
         )}
       </div>
@@ -213,10 +252,90 @@ export function GamePage() {
   )
 }
 
+function PhaseGuide({
+  guidance,
+  phaseLabel,
+  players,
+  currentSpeakerId,
+}: {
+  guidance: PlayerView["guidance"] | undefined
+  phaseLabel: string
+  players: { id: string; name: string; isAlive: boolean; isAI: boolean }[]
+  currentSpeakerId?: string
+}) {
+  const speaker = currentSpeakerId ? players.find(p => p.id === currentSpeakerId) : undefined
+  const progress = guidance?.progress
+  const progressPercent = progress ? Math.min(100, Math.max(0, (progress.current / progress.total) * 100)) : 0
+
+  return (
+    <section className={`border rounded p-4 ${guidance?.yourTurn ? "bg-amber-950/30 border-amber-600" : "bg-gray-900 border-gray-800"}`}>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-xs text-gray-500">{phaseLabel}</div>
+          <h2 className={`text-lg font-bold mt-1 ${guidance?.yourTurn ? "text-amber-300" : "text-white"}`}>
+            {guidance?.title ?? "游戏进行中"}
+          </h2>
+          <p className="text-sm text-gray-300 mt-2 leading-6">
+            {guidance?.description ?? "当前阶段正在推进，请稍候。"}
+          </p>
+        </div>
+        <div className={`text-xs px-2 py-1 rounded shrink-0 ${guidance?.yourTurn ? "bg-amber-600 text-white" : "bg-gray-800 text-gray-400"}`}>
+          {guidance?.yourTurn ? "需要你操作" : "等待中"}
+        </div>
+      </div>
+
+      {progress && (
+        <div className="mt-4">
+          <div className="flex justify-between text-xs text-gray-500 mb-1">
+            <span>{progress.label}</span>
+            <span>{progress.current}/{progress.total} · 下一步：{guidance?.nextStep}</span>
+          </div>
+          <div className="h-2 bg-gray-800 rounded overflow-hidden">
+            <div className="h-full bg-amber-500" style={{ width: `${progressPercent}%` }} />
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap gap-2 text-xs">
+        {speaker && (
+          <span className="px-2 py-1 bg-gray-800 rounded text-amber-300">
+            当前发言：{speaker.name}
+          </span>
+        )}
+        {guidance?.waitingFor?.slice(0, 4).map(name => (
+          <span key={name} className="px-2 py-1 bg-gray-800 rounded text-gray-400">
+            等待：{name}
+          </span>
+        ))}
+        {guidance?.allowedActions?.map(action => (
+          <span key={`${action.type}-${action.label}`} className="px-2 py-1 bg-amber-900/50 rounded text-amber-300">
+            可操作：{action.label}
+          </span>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function errorLabel(code: string): string {
+  const map: Record<string, string> = {
+    PLAYER_DEAD: "你已经死亡，无法操作",
+    ROLE_NOT_ALLOWED: "你的身份不能执行此操作",
+    WRONG_PHASE: "当前阶段不能执行此操作",
+    NOT_YOUR_SPEECH_TURN: "不是你的发言回合",
+    TARGET_DEAD: "目标已死亡",
+    TARGET_SELF_NOT_ALLOWED: "不能选择自己",
+    TARGET_IS_TEAMMATE: "不能选择狼队友",
+    ALREADY_VOTED: "你已经投过票了",
+  }
+  return map[code] ?? code
+}
+
 function phaseLabel(_type: string, sub: string): string {
   const map: Record<string, string> = {
     WAITING_PLAYERS: "等待玩家",
     ROLE_ASSIGNMENT: "分配身份",
+    ROLE_REVEAL: "确认身份",
     NIGHT_ANNOUNCE: "天黑请闭眼",
     WOLF_INTEL: "狼人确认同伴",
     WOLF_PROPOSE: "狼人请行动",

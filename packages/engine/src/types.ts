@@ -19,11 +19,24 @@ export interface PlayerView {
     round: number
     dayNumber: number
     currentSpeakerId?: string
+    deadline?: number
   }
+  guidance: PlayerGuidance
   speeches: { playerId: string; content: string; timestamp: number }[]
   voteResult?: { votes: Record<string, string | null>; exiledPlayerId?: string }
   deathAnnouncement?: { deaths: { playerId: string; cause: string }[]; isSafeNight: boolean }
   gameOver?: { winner: string; mvp: string; svp: string }
+  wolfConsensus?: { proposals: { wolfId: string; targetId: string; reason: string }[]; resolvedTarget?: string }
+}
+
+export interface PlayerGuidance {
+  title: string
+  description: string
+  yourTurn: boolean
+  waitingFor: string[]
+  nextStep: string
+  progress: { current: number; total: number; label: string }
+  allowedActions: { type: string; label: string; requiresTarget: boolean }[]
 }
 
 export interface PublicPlayer {

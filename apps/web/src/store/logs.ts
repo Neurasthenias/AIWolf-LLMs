@@ -15,19 +15,36 @@ export interface GameSummary {
   source?: string
 }
 
+export interface TraceIntent {
+  analysis?: {
+    knownFacts: string[]
+    privateFacts: string[]
+    suspicions: { playerId: string; score: number; reason: string }[]
+    strategy: string
+    risk: string
+  }
+  action: { type: string; targetId: string | null; reason?: string }
+  speech?: { content: string; tone: string }
+}
+
 export interface TraceEntry {
   gameId: string
   playerId: string
   task: string
   timestamp: number
+  model?: string
+  provider?: string
+  thinkingEnabled?: boolean
+  reasoningEffort?: "high" | "max"
+  reasoningContentLength?: number
+  finishReason?: string
   context: { systemPrompt: string; userPrompt: string }
   rawResponse: string
   reasoning: string
-  parsedIntent: {
-    action: { type: string; targetId: string | null; reason?: string }
-    speech?: { content: string; tone: string }
-  } | null
+  parsedIntent: TraceIntent | null
+  finalIntent?: TraceIntent | null
   parseError?: string
+  fallbackReason?: string
   usage: { promptTokens: number; completionTokens: number; totalTokens: number }
   latencyMs: number
   fallbackUsed: boolean

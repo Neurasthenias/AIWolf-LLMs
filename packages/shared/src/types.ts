@@ -5,7 +5,7 @@ export type FactionType = "good" | "wolf"
 export type PhaseType = "WAITING" | "NIGHT" | "DAY" | "GAME_OVER"
 
 export type SubPhaseType =
-  | "WAITING_PLAYERS" | "ROLE_ASSIGNMENT"
+  | "WAITING_PLAYERS" | "ROLE_ASSIGNMENT" | "ROLE_REVEAL"
   | "NIGHT_ANNOUNCE" | "WOLF_INTEL" | "WOLF_PROPOSE" | "WOLF_RESOLVE"
   | "SEER_CHOOSE" | "SEER_RESULT" | "WITCH_NOTIFY" | "WITCH_DECIDE"
   | "GUARD_CHOOSE" | "NIGHT_SETTLEMENT"
@@ -66,6 +66,7 @@ export interface VoteTally {
 export interface GameState {
   gameId: string
   version: string
+  config: GameConfig
   phase: PhaseDetail
   players: Record<string, PlayerState>
   witchPotions: { hasSave: boolean; hasPoison: boolean }
@@ -73,7 +74,7 @@ export interface GameState {
   sheriffElectionDone: boolean
   tieBreakCount: number
   currentSpeakerId?: string
-  phaseTimerDeadline?: number
+  phaseTimerDeadline?: number | undefined
   latestDeathAnnouncement?: DeathAnnouncement
   startedAt: number
   lastEventSeq: number
@@ -81,7 +82,10 @@ export interface GameState {
   speeches: SpeechRecord[]
   currentVoteTally?: VoteTally
   witchActions?: { saveTargetId?: string; poisonTargetId?: string }
-  wolfProposals?: { wolfId: string; targetId: string }[]
+  wolfProposals?: { wolfId: string; targetId: string; reason?: string }[]
+  roleAcks?: string[]
+  speechQueue?: string[]
+  speechDone?: string[]
   resolvedWolfTarget?: string
 }
 
