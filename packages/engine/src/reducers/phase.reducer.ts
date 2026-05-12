@@ -20,9 +20,7 @@ export function reducePhase(state: GameState, event: GameEvent): { newState: Gam
     case "phase:transitioned": {
       const { to, round } = event.payload as { from: string; to: SubPhaseType; round: number }
       const phaseType = PHASE_MAP[to] ?? state.phase.type
-      const newDayNumber = to === "DAY_BREAK" || to === "DEATH_ANNOUNCE"
-        ? state.phase.dayNumber + 1
-        : state.phase.dayNumber
+      const newDayNumber = to === "DAY_BREAK" ? round : state.phase.dayNumber
 
       effects.push({
         id: crypto.randomUUID(),

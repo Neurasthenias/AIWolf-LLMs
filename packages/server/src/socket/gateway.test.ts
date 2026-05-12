@@ -191,6 +191,99 @@ describe("Socket.IO — Integration", () => {
 
     client.close()
   })
+
+  it("human seer check via game:action auto-computes result", async () => {
+    const gameId = uuidv7()
+    const runtime = getOrCreateGame(gameId)
+
+    const client = createClient()
+    const events: any[] = []
+    let snapshot: any = null
+
+    await new Promise<void>((resolve) => {
+      client.on("connect", () => {
+        client.emit("room:join", { gameId, playerId: "p1", playerName: "Seer" })
+
+        setTimeout(async () => {
+          // Mutate state AFTER room:join (which resets p1 to defaults)
+          runtime.getState().players["p1"]!.role = "seer"
+          runtime.getState().players["p1"]!.faction = "good"
+          runtime.getState().players["p1"]!.isAlive = true
+          runtime.getState().players["p2"]!.isAlive = true
+          runtime.getState().players["p3"]!.role = "werewolf"
+          runtime.getState().players["p3"]!.faction = "wolf"
+          runtime.getState().players["p3"]!.isAlive = true
+          runtime.getState().phase.subPhase = "SEER_CHOOSE"
+
+          // Send seer check action with only targetId (no result)
+          client.emit("game:action", {
+            gameId, playerId: "p1", actionType: "night:seer_check", targetId: "p3",
+          }, (ack: { ok: boolean }) => {
+            expect(ack?.ok).toBe(true)
+          })
+          setTimeout(resolve, 200)
+        }, 100)
+      })
+      client.on("game:event", (e: any) => events.push(e))
+      client.on("game:state_snapshot", (v: any) => { snapshot = v })
+    })
+
+    // Should have received role:seer_result event with result field
+    const seerEvent = events.find((e: any) => e.type === "role:seer_result")
+    expect(seerEvent).toBeDefined()
+    expect(seerEvent.payload.targetId).toBe("p3")
+    expect(seerEvent.payload.result).toBe("wolf")
+
+    // Snapshot should include seerResults in view
+    const view = snapshot?.view
+    expect(view).toBeDefined()
+    expect(view?.seerResults).toBeDefined()
+    expect(view.seerResults.some((r: any) => r.targetId === "p3")).toBe(true)
+
+    client.close()
+  })
+
+  it("rejects seer check with missing targetId", async () => {
+    const gameId = uuidv7()
+    const runtime = getOrCreateGame(gameId)
+
+    // Set up a basic game state with a seer
+    await runtime.dispatch({
+      id: uuidv7(), version: "1.0", type: "room:join",
+      gameId, actorId: "p1", timestamp: Date.now(),
+      payload: { playerId: "p1", name: "Alice", seat: 1 },
+    })
+    await runtime.dispatch({
+      id: uuidv7(), version: "1.0", type: "room:join",
+      gameId, actorId: "p2", timestamp: Date.now(),
+      payload: { playerId: "p2", name: "Bob", seat: 2 },
+    })
+    // Manually set seer role and phase for validation
+    const state = runtime.getState()
+    state.players["p1"]!.role = "seer"
+    state.players["p1"]!.faction = "good"
+    state.phase.subPhase = "SEER_CHOOSE"
+
+    const client = createClient()
+    let error: string | null = null
+
+    await new Promise<void>((resolve) => {
+      client.on("connect", () => {
+        client.emit("room:join", { gameId, playerId: "p1", playerName: "Alice" })
+        setTimeout(() => {
+          client.emit("game:action", {
+            gameId, playerId: "p1", actionType: "night:seer_check",
+          }, (ack: { ok: boolean; error?: string }) => {
+            error = ack?.error ?? null
+            resolve()
+          })
+        }, 100)
+      })
+    })
+
+    expect(error).toBe("TARGET_REQUIRED")
+    client.close()
+  })
 })
 
 const testConfig = {

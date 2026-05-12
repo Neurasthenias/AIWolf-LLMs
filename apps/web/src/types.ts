@@ -20,8 +20,10 @@ export interface PlayerView {
   deathAnnouncement?: { deaths: { playerId: string; cause: string }[]; isSafeNight: boolean }
   gameOver?: { winner: string; mvp: string; svp: string }
   wolfConsensus?: { proposals: { wolfId: string; targetId: string; reason: string }[]; resolvedTarget?: string }
+  seerResults?: { round: number; targetId: string; result: "wolf" | "good" }[]
 }
 
 export interface GameEvent {
   seq: number; type: string; timestamp: number; payload: Record<string, unknown>
+  visibleTo?: string[]
 }

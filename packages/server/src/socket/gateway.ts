@@ -29,6 +29,11 @@ const ACTION_ROLE_MAP: Record<string, string[]> = {
   "night:witch_action": ["witch"],
 }
 
+const TARGET_REQUIRED_ACTIONS = new Set([
+  "night:wolf_kill",
+  "night:seer_check",
+])
+
 function validateAction(
   client: ClientState | undefined,
   runtime: GameRuntime,
@@ -52,6 +57,10 @@ function validateAction(
   if (!requiredPhase) return "UNKNOWN_ACTION"
   if (requiredPhase && state.phase.subPhase !== requiredPhase) {
     return "WRONG_PHASE"
+  }
+
+  if (TARGET_REQUIRED_ACTIONS.has(data.actionType) && !data.targetId) {
+    return "TARGET_REQUIRED"
   }
 
   if (data.actionType === "speech:submit" && state.currentSpeakerId && state.currentSpeakerId !== data.playerId) {
@@ -146,11 +155,17 @@ export function createGateway(httpServer: HTTPServer) {
         ack?.({ ok: false, error: err })
         return
       }
+
+      // Seer check result is computed at gateway level
+      const payload: Record<string, unknown> = data.actionType === "night:seer_check"
+        ? { targetId: data.targetId, result: (runtime.getState().players[data.targetId!]?.faction === "wolf" ? "wolf" : "good") }
+        : { targetId: data.targetId }
+
       const cmd: Command = {
         id: uuidv7(), version: "1.0",
         type: data.actionType,
         gameId: data.gameId, actorId: data.playerId, timestamp: Date.now(),
-        payload: { targetId: data.targetId },
+        payload,
       }
       await runtime.dispatch(cmd)
       ack?.({ ok: true })

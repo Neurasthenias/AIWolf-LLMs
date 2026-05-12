@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { createGame, reduce, replayState, handleCommand, determineNextPhase, assignRoles } from "./index"
+import { createGame, reduce, replayState, handleCommand, determineNextPhase, assignRoles, isPhaseComplete, buildPlayerView } from "./index"
 import type { GameState, GameEvent, GameConfig } from "@aiwolf/shared/types"
 import { v7 as uuidv7 } from "uuid"
 import fc from "fast-check"
@@ -72,6 +72,36 @@ describe("Engine — Domain Reducers", () => {
     const event = makeEvent({ type: "game:ended", payload: { winner: "good", mvp: "p3", svp: "p2" } })
     const { newState } = reduce(state, event)
     expect(newState.gameOver?.winner).toBe("good")
+  })
+
+  it("role:seer_result writes seerChecks", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "SEER_CHOOSE", round: 1, dayNumber: 1 }
+    const event = makeEvent({
+      type: "role:seer_result", visibility: "private", visibleTo: ["p1"],
+      payload: { playerId: "p1", targetId: "p2", result: "wolf" },
+    })
+    const { newState } = reduce(state, event)
+    expect(newState.seerChecks).toBeDefined()
+    expect(newState.seerChecks).toHaveLength(1)
+    expect(newState.seerChecks![0]).toMatchObject({
+      round: 1, seerId: "p1", targetId: "p2", result: "wolf",
+    })
+  })
+
+  it("role:seer_result appends without overwriting", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "SEER_CHOOSE", round: 2, dayNumber: 2 }
+    state.seerChecks = [{ round: 1, seerId: "p1", targetId: "p3", result: "good" }]
+    const event = makeEvent({
+      type: "role:seer_result", visibility: "private", visibleTo: ["p1"],
+      payload: { playerId: "p1", targetId: "p2", result: "wolf" },
+    })
+    const { newState } = reduce(state, event)
+    expect(newState.seerChecks).toHaveLength(2)
+    expect(newState.seerChecks![1]).toMatchObject({
+      round: 2, seerId: "p1", targetId: "p2", result: "wolf",
+    })
   })
 })
 
@@ -211,6 +241,110 @@ describe("Engine — Phase Driver", () => {
     state.phase = { type: "DAY", subPhase: "DAY_SETTLEMENT", round: 1, dayNumber: 1 }
     expect(determineNextPhase(state)).toBe("NIGHT_ANNOUNCE")
   })
+
+  it("isPhaseComplete: SEER_CHOOSE false when seer hasn't acted", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "SEER_CHOOSE", round: 1, dayNumber: 1 }
+    state.players["p1"] = { ...state.players["p1"]!, role: "seer", faction: "good", isAlive: true }
+    expect(isPhaseComplete(state)).toBe(false)
+  })
+
+  it("isPhaseComplete: SEER_CHOOSE true after seer check", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "SEER_CHOOSE", round: 1, dayNumber: 1 }
+    state.players["p1"] = { ...state.players["p1"]!, role: "seer", faction: "good", isAlive: true }
+    state.seerChecks = [{ round: 1, seerId: "p1", targetId: "p2", result: "wolf" }]
+    expect(isPhaseComplete(state)).toBe(true)
+  })
+
+  it("isPhaseComplete: SEER_CHOOSE true when seer is dead", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "SEER_CHOOSE", round: 1, dayNumber: 1 }
+    state.players["p1"] = { ...state.players["p1"]!, role: "seer", faction: "good", isAlive: false }
+    expect(isPhaseComplete(state)).toBe(true)
+  })
+
+  it("isPhaseComplete: SEER_CHOOSE false for wrong round check", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "SEER_CHOOSE", round: 2, dayNumber: 2 }
+    state.players["p1"] = { ...state.players["p1"]!, role: "seer", faction: "good", isAlive: true }
+    // Previous round check should not count
+    state.seerChecks = [{ round: 1, seerId: "p1", targetId: "p2", result: "good" }]
+    expect(isPhaseComplete(state)).toBe(false)
+  })
+})
+
+describe("Engine — Round / DayNumber", () => {
+  it("phase:transitioned preserves round within same night/day", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "WOLF_PROPOSE", round: 1, dayNumber: 1 }
+    const event = makeEvent({ type: "phase:transitioned", payload: { from: "WOLF_PROPOSE", to: "SEER_CHOOSE", round: 1 } })
+    const { newState } = reduce(state, event)
+    expect(newState.phase.round).toBe(1)
+    expect(newState.phase.subPhase).toBe("SEER_CHOOSE")
+  })
+
+  it("DAY_SETTLEMENT -> NIGHT_ANNOUNCE must increment round", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "DAY", subPhase: "DAY_SETTLEMENT", round: 1, dayNumber: 1 }
+    // Simulate the event that would be dispatched by runtime with round=2
+    const event = makeEvent({ type: "phase:transitioned", payload: { from: "DAY_SETTLEMENT", to: "NIGHT_ANNOUNCE", round: 2 } })
+    const { newState } = reduce(state, event)
+    expect(newState.phase.round).toBe(2)
+    expect(newState.phase.subPhase).toBe("NIGHT_ANNOUNCE")
+  })
+
+  it("second night SEER_CHOOSE not blocked by first night seerChecks", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "SEER_CHOOSE", round: 2, dayNumber: 2 }
+    state.players["p1"] = { ...state.players["p1"]!, role: "seer", faction: "good", isAlive: true }
+    // Round 1 check should NOT satisfy round 2
+    state.seerChecks = [{ round: 1, seerId: "p1", targetId: "p2", result: "good" }]
+    expect(isPhaseComplete(state)).toBe(false)
+  })
+
+  it("DAY_BREAK sets dayNumber = round (round 1 → day 1)", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "NIGHT_SETTLEMENT", round: 1, dayNumber: 1 }
+    const event = makeEvent({ type: "phase:transitioned", payload: { from: "NIGHT_SETTLEMENT", to: "DAY_BREAK", round: 1 } })
+    const { newState } = reduce(state, event)
+    expect(newState.phase.dayNumber).toBe(1)
+  })
+
+  it("DEATH_ANNOUNCE does NOT increment dayNumber", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "DAY", subPhase: "DAY_BREAK", round: 1, dayNumber: 1 }
+    const event = makeEvent({ type: "phase:transitioned", payload: { from: "DAY_BREAK", to: "DEATH_ANNOUNCE", round: 1 } })
+    const { newState } = reduce(state, event)
+    expect(newState.phase.dayNumber).toBe(1)
+    expect(newState.phase.subPhase).toBe("DEATH_ANNOUNCE")
+  })
+
+  it("second night DAY_BREAK shows dayNumber 2 (round 2 → day 2)", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "NIGHT_SETTLEMENT", round: 2, dayNumber: 1 }
+    const event = makeEvent({ type: "phase:transitioned", payload: { from: "NIGHT_SETTLEMENT", to: "DAY_BREAK", round: 2 } })
+    const { newState } = reduce(state, event)
+    expect(newState.phase.dayNumber).toBe(2)
+  })
+
+  it("DAY_BREAK uses payload round even when state round differs", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "NIGHT_SETTLEMENT", round: 1, dayNumber: 1 }
+    // Simulate the event that runtime dispatches after DAY_SETTLEMENT→NIGHT_ANNOUNCE already incremented round
+    const event = makeEvent({ type: "phase:transitioned", payload: { from: "NIGHT_SETTLEMENT", to: "DAY_BREAK", round: 2 } })
+    const { newState } = reduce(state, event)
+    expect(newState.phase.dayNumber).toBe(2)
+    expect(newState.phase.round).toBe(2)
+  })
+
+  it("third night DAY_BREAK shows dayNumber 3 (round 3 → day 3)", () => {
+    const state = createGame(testConfig)
+    state.phase = { type: "NIGHT", subPhase: "NIGHT_SETTLEMENT", round: 3, dayNumber: 1 }
+    const event = makeEvent({ type: "phase:transitioned", payload: { from: "NIGHT_SETTLEMENT", to: "DAY_BREAK", round: 3 } })
+    const { newState } = reduce(state, event)
+    expect(newState.phase.dayNumber).toBe(3)
+  })
 })
 
 describe("Engine — Command Handler", () => {
@@ -258,6 +392,27 @@ describe("Engine — Assign Roles", () => {
     const a1 = assignRoles(state.players, testConfig, 42)
     const a2 = assignRoles(state.players, testConfig, 42)
     expect(JSON.stringify(a1)).toBe(JSON.stringify(a2))
+  })
+})
+
+describe("Engine — Projection", () => {
+  it("seer sees seerResults in player view", () => {
+    const state = createGame(testConfig)
+    state.players["p1"] = { ...state.players["p1"]!, role: "seer", faction: "good", isAlive: true }
+    state.seerChecks = [{ round: 1, seerId: "p1", targetId: "p2", result: "wolf" }]
+    const view = buildPlayerView(state, "p1")
+    expect(view.seerResults).toBeDefined()
+    expect(view.seerResults).toHaveLength(1)
+    expect(view.seerResults![0]).toMatchObject({ round: 1, targetId: "p2", result: "wolf" })
+  })
+
+  it("non-seer does not see seerResults", () => {
+    const state = createGame(testConfig)
+    state.players["p1"] = { ...state.players["p1"]!, role: "seer", faction: "good", isAlive: true }
+    state.players["p2"] = { ...state.players["p2"]!, role: "villager", faction: "good", isAlive: true }
+    state.seerChecks = [{ round: 1, seerId: "p1", targetId: "p2", result: "wolf" }]
+    const view = buildPlayerView(state, "p2")
+    expect(view.seerResults).toBeUndefined()
   })
 })
 

@@ -4,6 +4,7 @@ export function isPhaseComplete(state: GameState): boolean {
   switch (state.phase.subPhase) {
     case "ROLE_REVEAL": return allPlayersAcked(state)
     case "WOLF_PROPOSE": return allWolvesProposed(state)
+    case "SEER_CHOOSE": return seerActedOrNoAliveSeer(state)
     case "SPEECH_TURN_ACTIVE": return allPlayersSpoke(state)
     case "VOTE_CAST": return allAliveVoted(state)
     default: return true
@@ -61,6 +62,14 @@ function allPlayersSpoke(state: GameState): boolean {
 function allWolvesProposed(state: GameState): boolean {
   const aliveWolves = Object.values(state.players).filter(p => p.isAlive && p.role === "werewolf")
   return aliveWolves.every(w => (state.wolfProposals ?? []).some(p => p.wolfId === w.id))
+}
+
+function seerActedOrNoAliveSeer(state: GameState): boolean {
+  const seer = Object.values(state.players).find(p => p.isAlive && p.role === "seer")
+  if (!seer) return true
+  return (state.seerChecks ?? []).some(c =>
+    c.round === state.phase.round && c.seerId === seer.id,
+  )
 }
 
 function checkWinCondition(state: GameState): boolean {

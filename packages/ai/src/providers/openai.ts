@@ -18,6 +18,13 @@ export interface AIProviderConfig {
   maxTokens?: number
 }
 
+export interface AIRequestOptions {
+  fastMode?: boolean
+  maxTokens?: number
+  thinkingEnabled?: boolean
+  reasoningEffort?: "high" | "max"
+}
+
 export const AIIntentSchema = z.object({
   analysis: z.object({
     knownFacts: z.array(z.string()).default([]),
@@ -79,7 +86,7 @@ export class AIProvider {
     this.maxTokens = config.maxTokens ?? 4096
   }
 
-  async generate(systemPrompt: string, userPrompt: string): Promise<{
+  async generate(systemPrompt: string, userPrompt: string, options?: AIRequestOptions): Promise<{
     raw: string
     reasoning: string
     intent: AIIntent | null
@@ -96,11 +103,15 @@ export class AIProvider {
     latencyMs: number
   }> {
     const start = Date.now()
-    const thinkingEnabled = !!this.thinking?.enabled
+    const thinkingEnabled = options?.thinkingEnabled !== undefined
+      ? options.thinkingEnabled
+      : !!this.thinking?.enabled
+
+    const maxTokens = options?.maxTokens ?? this.maxTokens
 
     const request: Record<string, unknown> = {
       model: this.model,
-      max_tokens: this.maxTokens,
+      max_tokens: maxTokens,
       response_format: { type: "json_object" },
       messages: [
         { role: "system", content: systemPrompt },
@@ -109,11 +120,15 @@ export class AIProvider {
     }
 
     if (thinkingEnabled) {
-      request.reasoning_effort = this.thinking?.effort ?? "high"
+      request.reasoning_effort = options?.reasoningEffort ?? this.thinking?.effort ?? "high"
       request.thinking = { type: "enabled" }
     } else {
       request.temperature = this.temperature
     }
+
+    const reasoningEffort = thinkingEnabled
+      ? (request.reasoning_effort as string | undefined)
+      : undefined
 
     const response = await this.client.chat.completions.create(request as unknown as Parameters<typeof this.client.chat.completions.create>[0]) as any
 
@@ -131,7 +146,7 @@ export class AIProvider {
       model: this.model,
       provider: this.provider ?? "openai-compatible",
       thinkingEnabled,
-      ...(this.thinking?.effort ? { reasoningEffort: this.thinking.effort } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       reasoningContentLength: reasoning.length,
       ...(finishReason ? { finishReason } : {}),
     }

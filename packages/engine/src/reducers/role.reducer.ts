@@ -35,8 +35,17 @@ export function reduceRole(state: GameState, event: GameEvent): { newState: Game
       }
     }
     case "role:seer_result": {
-      // Result stored in events, projection surfaces it to seer
-      return { newState: state, effects }
+      const { playerId, targetId, result } = event.payload as { playerId: string; targetId: string; result: "wolf" | "good" }
+      return {
+        newState: {
+          ...state,
+          seerChecks: [
+            ...(state.seerChecks ?? []),
+            { round: state.phase.round, seerId: playerId, targetId, result },
+          ],
+        },
+        effects,
+      }
     }
     case "role:witch_notified": {
       return { newState: state, effects }

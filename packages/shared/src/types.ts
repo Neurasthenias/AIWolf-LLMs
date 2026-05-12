@@ -83,6 +83,7 @@ export interface GameState {
   currentVoteTally?: VoteTally
   witchActions?: { saveTargetId?: string; poisonTargetId?: string }
   wolfProposals?: { wolfId: string; targetId: string; reason?: string }[]
+  seerChecks?: { round: number; seerId: string; targetId: string; result: "wolf" | "good" }[]
   roleAcks?: string[]
   speechQueue?: string[]
   speechDone?: string[]

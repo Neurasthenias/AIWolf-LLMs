@@ -29,6 +29,8 @@ export interface AITrace {
   fallbackUsed: boolean
 }
 
+import type { AIRequestOptions } from "./providers/openai"
+
 export class AIPipeline {
   private provider: AIProvider
   private traceDir: string
@@ -72,6 +74,7 @@ export class AIPipeline {
     playerId: string,
     task: "speech" | "vote" | "wolf_kill" | "seer_check" | "witch_action" | "last_words",
     events?: GameEvent[],
+    options?: AIRequestOptions,
   ): Promise<{ command: Command; trace: AITrace }> {
     // Feed recent events to memory
     if (events) {
@@ -83,7 +86,7 @@ export class AIPipeline {
     const personality = this.personalities.get(playerId)
     const memory = this.memories.get(playerId)
     const context = buildContext(state, playerId, task, personality, memory)
-    const result = await this.provider.generate(context.systemPrompt, context.userPrompt)
+    const result = await this.provider.generate(context.systemPrompt, context.userPrompt, options)
 
     // Build trace
     const trace: AITrace = {
@@ -93,7 +96,7 @@ export class AIPipeline {
       timestamp: Date.now(),
       model: result.meta.model,
       provider: result.meta.provider,
-      thinkingEnabled: result.meta.thinkingEnabled,
+      thinkingEnabled: options?.thinkingEnabled !== undefined ? options.thinkingEnabled : result.meta.thinkingEnabled,
       ...(result.meta.reasoningEffort ? { reasoningEffort: result.meta.reasoningEffort } : {}),
       reasoningContentLength: result.meta.reasoningContentLength,
       ...(result.meta.finishReason ? { finishReason: result.meta.finishReason } : {}),

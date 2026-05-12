@@ -49,6 +49,11 @@ export function buildPlayerView(state: GameState, playerId: string): PlayerView 
         ...(state.resolvedWolfTarget ? { resolvedTarget: state.resolvedWolfTarget } : {}),
       },
     } : {}),
+    ...(player.role === "seer" && state.seerChecks ? {
+      seerResults: state.seerChecks
+        .filter(c => c.seerId === playerId)
+        .map(c => ({ round: c.round, targetId: c.targetId, result: c.result })),
+    } : {}),
   }
 }
 

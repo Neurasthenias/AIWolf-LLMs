@@ -14,6 +14,13 @@ const AUTO_ADVANCE_PHASES = new Set([
   "VOTE_REVEAL", "EXILE_ANNOUNCE", "DAY_SETTLEMENT", "CHECK_WIN",
 ])
 
+function nextRoundForTransition(state: GameState, to: string): number {
+  if (state.phase.subPhase === "DAY_SETTLEMENT" && to === "NIGHT_ANNOUNCE") {
+    return state.phase.round + 1
+  }
+  return state.phase.round
+}
+
 export class GameRuntime {
   private commandQueue: Command[] = []
   private processing = false
@@ -146,7 +153,7 @@ export class GameRuntime {
         this.commandQueue.unshift({
           id: uuidv7(), version: "1.0", type: "phase:advance",
           gameId: this.gameId, actorId: "system", timestamp: Date.now(),
-          payload: { to: next, round: currentState.phase.round },
+          payload: { to: next, round: nextRoundForTransition(currentState, next) },
         })
       }
     } else if (INTERACTIVE_PHASES.has(subPhase)) {
@@ -189,7 +196,7 @@ export class GameRuntime {
         const phaseCmd: Command = {
           id: uuidv7(), version: "1.0", type: "phase:advance",
           gameId: this.gameId, actorId: "system", timestamp: Date.now(),
-          payload: { to: nextPhase, round: currentState.phase.round },
+          payload: { to: nextPhase, round: nextRoundForTransition(currentState, nextPhase) },
         }
         currentState = await this.dispatchInlineCmd(phaseCmd)
       }
@@ -224,7 +231,7 @@ export class GameRuntime {
         await this.dispatch({
           id: uuidv7(), version: "1.0", type: "phase:advance",
           gameId: this.gameId, actorId: "system", timestamp: Date.now(),
-          payload: { to: nextPhase, round: currentState.phase.round },
+          payload: { to: nextPhase, round: nextRoundForTransition(currentState, nextPhase) },
         })
         break
       }
@@ -300,16 +307,37 @@ export class GameRuntime {
       case "SEER_CHOOSE": {
         const seer = aiPlayers.find(p => p.role === "seer")
         if (seer) {
+          // First night: no speeches or prior checks, use fast mode
+          const isFirstSeerCheck =
+            s.phase.round === 1 &&
+            (s.seerChecks ?? []).length === 0
+          const opts = isFirstSeerCheck
+            ? { fastMode: true, maxTokens: 512, thinkingEnabled: false }
+            : undefined
           try {
-            const { command } = await pipeline.generateAction(s, seer.id, "seer_check", this.aiEventsFeed)
-            const targetId = (command.payload as { targetId: string }).targetId
-            const target = s.players[targetId]
-            const result = target?.faction === "wolf" ? "wolf" : "good"
-            s = await this.dispatchInlineCmd({
-              ...command,
-              type: "night:seer_check",
-              payload: { ...command.payload as object, result },
-            })
+            const { command } = await pipeline.generateAction(s, seer.id, "seer_check", this.aiEventsFeed, opts)
+            const targetId = (command.payload as { targetId?: string }).targetId
+            const target = targetId ? s.players[targetId] : undefined
+            // Validate: target must exist, alive, not self
+            if (target && target.isAlive && targetId !== seer.id) {
+              const result = target.faction === "wolf" ? "wolf" : "good"
+              s = await this.dispatchInlineCmd({
+                ...command,
+                type: "night:seer_check",
+                payload: { targetId, result },
+              })
+            } else {
+              // AI returned invalid target, fallback
+              const alive = Object.values(s.players).filter(p => p.isAlive && p.id !== seer.id)
+              if (alive.length > 0) {
+                const t = alive[Math.floor(Math.random() * alive.length)]!
+                s = await this.dispatchInlineCmd({
+                  id: uuidv7(), version: "1.0", type: "night:seer_check",
+                  gameId: this.gameId, actorId: seer.id, timestamp: Date.now(),
+                  payload: { targetId: t.id, result: t.faction === "wolf" ? "wolf" : "good" },
+                })
+              }
+            }
           } catch {
             const alive = Object.values(s.players).filter(p => p.isAlive && p.id !== seer.id)
             if (alive.length > 0) {

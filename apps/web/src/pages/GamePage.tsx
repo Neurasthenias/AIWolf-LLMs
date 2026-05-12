@@ -2,6 +2,8 @@ import { useState } from "react"
 import { useGameStore } from "../store/game"
 import { RoleRevealModal } from "../components/RoleRevealModal"
 import { WolfTeamPanel } from "../components/WolfTeamPanel"
+import { SeerActionPanel } from "../components/SeerActionPanel"
+import { formatGameEvent } from "../utils/eventFormatter"
 import type { PlayerView } from "../types"
 
 export function GamePage() {
@@ -144,11 +146,25 @@ export function GamePage() {
 
           {/* Replay log */}
           {showReplay && (
-            <div className="text-xs text-gray-500 max-h-40 overflow-y-auto space-y-1">
+            <div className="text-xs text-gray-500 max-h-60 overflow-y-auto space-y-1">
               <h3 className="text-gray-400 font-bold">事件日志</h3>
-              {events.slice(-30).map((e, i) => (
-                <p key={i}>#{e.seq} {e.type}</p>
-              ))}
+              {events.slice(-30).map((e, i) => {
+                const item = formatGameEvent(e, players, self.id)
+                const toneClass: Record<string, string> = {
+                  info: "",
+                  good: "text-green-400",
+                  danger: "text-red-400",
+                  private: "text-amber-400",
+                  system: "text-blue-400",
+                }
+                return (
+                  <div key={i} className={toneClass[item.tone] ?? ""}>
+                    <span className="text-gray-600">#{e.seq}</span>{" "}
+                    <strong>{item.title}</strong>
+                    {item.detail && <span className="text-gray-400 ml-1">— {item.detail}</span>}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -212,20 +228,22 @@ export function GamePage() {
         )}
 
         {/* Night action panel */}
-        {!isGameOver && canAct && (
+        {!isGameOver && canAct && isSeerPhase ? (
+          <SeerActionPanel />
+        ) : !isGameOver && canAct && (
           <div className="flex gap-2 flex-wrap">
             {actionPending ? (
               <p className="text-sm text-amber-400">已提交行动，等待阶段推进...</p>
             ) : (
               <>
                 <p className="w-full text-xs text-amber-400 mb-1">
-                  {isWolfPhase ? "选择击杀目标" : isSeerPhase ? "选择查验目标" : "选择行动"}
+                  {isWolfPhase ? "选择击杀目标" : "选择行动"}
                 </p>
                 {players
                   .filter(p => p.isAlive && p.id !== self.id && !(isWolfPhase && self.teammates?.includes(p.id)))
                   .map(p => (
                   <button key={p.id} onClick={() => sendAction(
-                    isWolfPhase ? "night:wolf_kill" : isSeerPhase ? "night:seer_check" : "night:witch_action",
+                    isWolfPhase ? "night:wolf_kill" : "night:witch_action",
                     p.id
                   )} className="px-3 py-2 bg-red-900 rounded hover:bg-red-700 text-sm">
                     {p.name}
